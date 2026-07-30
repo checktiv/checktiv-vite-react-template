@@ -1,0 +1,113 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "checktiv-pms-demo",
+	"main": "./src/worker/index.ts",
+	"compatibility_date": "2026-07-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		// Observability must NOT be configured to log request headers or bodies:
+		// the demo forwards the visitor's `ah_sk_*` key + token-bearing upstream
+		// responses through this Worker and neither may ever reach a log sink.
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	// Static-assets routing. `run_worker_first: ["/api/*"]` invokes the Worker for
+	// `/api/*` requests ONLY; every other path is served straight from the built
+	// client bundle, and `not_found_handling: "single-page-application"` returns
+	// `index.html` (200) for unknown NON-`/api` paths so the React Router client
+	// routes resolve. This is what keeps the Worker from ever shadowing the SPA and
+	// the SPA from ever shadowing a fail-loud `/api` 404/501 (see `src/worker/index.ts`).
+	// `assets` is an INHERITABLE key, so `env.production` inherits this block; it is
+	// re-stated there for explicitness (the deployed SPA depends on it).
+	"assets": {
+		"directory": "./dist/client",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*"]
+	},
+	// Local-dev persistence: reservations live in D1 while developing
+	// (`PERSISTENCE=d1`). The deployed Worker (`env.production` below) binds NO D1
+	// and stores nothing server-side (`PERSISTENCE=local` -> browser localStorage).
+	// The Worker `PERSISTENCE` var pairs with the client-side `VITE_PERSISTENCE`
+	// build-time var read by the store selector; the two MUST agree (they are one
+	// paired source the deployer sets once).
+	"vars": {
+		"PERSISTENCE": "d1"
+	},
+	// D1 is a NON-inheritable binding and is defined ONLY here (top level / local
+	// dev). It is deliberately ABSENT from `env.production`, so the deployed Worker
+	// has no `env.DB` and `reservationsRoute()` returns its structured 501. The
+	// `scripts/assert-no-d1-in-deploy-env.mjs` pre-deploy guard FAILS if a future
+	// edit re-introduces any `d1_databases` under `env.production`.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "checktiv-pms-demo-local",
+			"database_id": "local-dev-placeholder",
+			"migrations_dir": "migrations"
+		}
+	],
+	"env": {
+		// Deployed, STATELESS demo. Zero server persistence: no D1 binding, so
+		// reservations live in the staff browser's localStorage. Deploy with
+		// `pnpm run deploy`. Under `@cloudflare/vite-plugin` the active Wrangler env is
+		// selected at BUILD time via the `CLOUDFLARE_ENV` variable (NOT the `--env`
+		// flag): the deploy script runs `CLOUDFLARE_ENV=production vite build` so the
+		// generated ("redirected") deploy config is flattened to THIS `production`
+		// block. A plain `pnpm build` (no `CLOUDFLARE_ENV`) resolves the TOP-LEVEL
+		// (D1-bound, stateful) config and must NEVER be deployed - it would ship server
+		// persistence, violating the zero-persistence invariant.
+		"production": {
+			"vars": {
+				// Pairs with the client build's `VITE_PERSISTENCE=local` (.env.production);
+				// the two MUST agree or the browser calls `/api/reservations` and hits
+				// the structured 501.
+				"PERSISTENCE": "local",
+				// Authoritative `workspace_token` `origin` body field for the deployed
+				// origin. Being set here means the proxy does NOT fall back to the
+				// request `Origin` header in production.
+				"PUBLIC_ORIGIN": "https://sdk-demo.checktiv.com"
+				// DEMO_ALLOW_DECIDE is intentionally UNSET here: the deployed demo grants
+				// the READ-only reviewer capability subset by default. Set it to "true"
+				// (and use a TEST key) only to demo the decision flow. Documented in
+				// `.dev.vars.example`.
+			},
+			// Custom domain: the deployed demo origin. `custom_domain: true` makes
+			// Cloudflare manage the DNS record + certificate; all paths route here.
+			"routes": [
+				{
+					"pattern": "sdk-demo.checktiv.com",
+					"custom_domain": true
+				}
+			],
+			// Re-stated for explicitness (inherited from top level otherwise). The
+			// deployed SPA + `/api/*` worker-first routing depend on this exact block.
+			"assets": {
+				"directory": "./dist/client",
+				"not_found_handling": "single-page-application",
+				"run_worker_first": ["/api/*"]
+			},
+			// Coarse per-IP rate limit on the whole `/api/checktiv/*` relay - the real
+			// cost ceiling on live mints (the mock `requireStaff` gate has public
+			// credentials and stops nothing on its own). 100 requests / 60s per edge
+			// IP: generous enough for legitimate staff mint + status-poll traffic,
+			// tight enough to bound an abusive burst. `simple.period` must be 10 or 60.
+			//
+			// `namespace_id` is a positive integer scoped PER CLOUDFLARE ACCOUNT (not
+			// per Worker): two bindings that share an id share the same counters, even
+			// across Workers. A distinctive value is used so this demo's limiter does
+			// not accidentally share counters with another Worker on the account. Such
+			// a collision would only make the limit STRICTER (shared count), never open
+			// a hole, so this is a robustness choice, not a security control.
+			"ratelimits": [
+				{
+					"name": "CHECKTIV_RATE_LIMITER",
+					"namespace_id": "770125",
+					"simple": {
+						"limit": 100,
+						"period": 60
+					}
+				}
+			]
+		}
+	}
+}

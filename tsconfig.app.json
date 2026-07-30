@@ -7,6 +7,12 @@
 		"module": "ESNext",
 		"skipLibCheck": true,
 
+		/* `vite/client` types `import.meta.env` (ImportMetaEnv/ImportMeta) - explicit
+		 * here (not just the `vite-env.d.ts` triple-slash reference) so every file in
+		 * this project reading `import.meta.env.VITE_*` (e.g. reservation-store.ts's
+		 * `selectStore()`) type-checks under `tsc -b`. */
+		"types": ["vite/client"],
+
 		/* Bundler mode */
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
@@ -15,6 +21,10 @@
 		"noEmit": true,
 		"jsx": "react-jsx",
 
+		/* shadcn/ui alias - mirrors the `@` alias in vite.config.ts */
+		"baseUrl": ".",
+		"paths": { "@/*": ["src/react-app/*"] },
+
 		/* Linting */
 		"strict": true,
 		"noUnusedLocals": true,
@@ -22,5 +32,5 @@
 		"noFallthroughCasesInSwitch": true,
 		"noUncheckedSideEffectImports": true
 	},
-	"include": ["src/react-app"]
+	"include": ["src/react-app", "src/shared"]
 }

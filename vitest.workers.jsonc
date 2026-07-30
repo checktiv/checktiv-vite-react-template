@@ -1,0 +1,18 @@
+{
+	// Wrangler config used ONLY by the @cloudflare/vitest-pool-workers project in
+	// vitest.config.ts. It declares the same `DB` D1 binding the Worker uses so
+	// env.DB exists inside the Workers-pool test runtime (Miniflare provides an
+	// in-memory D1). Kept separate from wrangler.jsonc so test bindings never leak
+	// into a real deploy.
+	"name": "checktiv-pms-demo-test",
+	"main": "./src/worker/index.ts",
+	"compatibility_date": "2025-10-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "test",
+			"database_id": "test"
+		}
+	]
+}

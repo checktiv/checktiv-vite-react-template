@@ -1,46 +1,68 @@
 {
-	"name": "checktiv-vite-react-template",
-	"description": "A template for building a React application with Vite, Hono, and Cloudflare Workers",
-	"cloudflare": {
-		"label": "Vite React Template",
-		"products": [
-			"Workers"
-		],
-		"categories": [],
-		"preview_icon_url": "https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/532a5378-9717-4964-385b-5fafd2160200/public",
-		"preview_image_url": "https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/ec7f4be5-d1d6-4e94-0851-126341745400/preview",
-		"publish": true
+	"name": "checktiv-pms-demo",
+	"description": "Stateless bring-your-own-key PMS demo showing end-to-end Checktiv integration on Cloudflare Workers",
+	"engines": {
+		"node": ">=20"
 	},
+	"license": "MIT",
 	"dependencies": {
-		"hono": "4.11.1",
-		"react": "19.2.1",
-		"react-dom": "19.2.1"
+		"@checktiv/sdk-web": "^1.5.0",
+		"@radix-ui/react-dialog": "^1.1.23",
+		"@radix-ui/react-label": "^2.1.15",
+		"@radix-ui/react-slot": "^1.3.3",
+		"drizzle-orm": "^0.45.2",
+		"hono": "4.12.32",
+		"react": "19.2.8",
+		"react-dom": "19.2.8",
+		"react-router": "^8.3.0"
 	},
 	"devDependencies": {
-		"@cloudflare/vite-plugin": "1.15.3",
+		"@cloudflare/vite-plugin": "1.48.0",
+		"@cloudflare/vitest-pool-workers": "^0.19.0",
 		"@eslint/js": "9.39.1",
+		"@tailwindcss/vite": "^4.3.3",
+		"@testing-library/jest-dom": "^7.0.0",
+		"@testing-library/react": "^16.3.2",
+		"@testing-library/user-event": "^14.6.1",
 		"@types/node": "24.10.1",
-		"@types/react": "19.2.7",
+		"@types/react": "19.2.17",
 		"@types/react-dom": "19.2.3",
 		"@vitejs/plugin-react": "5.1.1",
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"drizzle-kit": "^0.31.10",
 		"eslint": "9.39.2",
-		"eslint-plugin-react-hooks": "7.0.1",
-		"eslint-plugin-react-refresh": "0.4.24",
+		"eslint-plugin-react-hooks": "7.1.1",
+		"eslint-plugin-react-refresh": "0.5.3",
 		"globals": "16.5.0",
+		"happy-dom": "^20.11.1",
+		"lucide-react": "^1.27.0",
+		"tailwind-merge": "^3.6.0",
+		"tailwindcss": "^4.3.3",
 		"typescript": "5.9.3",
-		"typescript-eslint": "8.48.0",
+		"typescript-eslint": "8.65.0",
 		"vite": "^7.0.0",
-		"wrangler": "4.88.0"
+		"vitest": "^4.1.10",
+		"wrangler": "4.115.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"esbuild",
+			"sharp",
+			"workerd"
+		]
 	},
 	"private": true,
 	"scripts": {
 		"build": "tsc -b && vite build",
 		"cf-typegen": "wrangler types",
-		"check": "tsc && vite build && wrangler deploy --dry-run",
-		"deploy": "wrangler deploy",
+		"check": "tsc -b && CLOUDFLARE_ENV=production vite build && CLOUDFLARE_ENV=production wrangler deploy --dry-run",
+		"db:migrate:local": "wrangler d1 migrations apply DB --local",
+		"deploy": "CLOUDFLARE_ENV=production vite build && node scripts/assert-no-secret-or-drizzle-in-bundle.mjs && node scripts/assert-no-d1-in-deploy-env.mjs && CLOUDFLARE_ENV=production wrangler deploy",
 		"dev": "vite",
 		"lint": "eslint .",
-		"preview": "npm run build && vite preview"
+		"preview": "pnpm build && vite preview",
+		"test": "vitest run"
 	},
 	"type": "module"
 }

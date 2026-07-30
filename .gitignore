@@ -195,5 +195,16 @@ dist
 .wrangler/
 .env*
 !.env.example
+# Committed NON-secret persistence-mode files (VITE_PERSISTENCE only, no secrets):
+# exact-match negations so per-developer/secret env files (.env.local, .env.*.local) stay ignored.
+!.env
+!.env.production
 .dev.vars*
 !.dev.vars.example
+
+# SDD orchestration scratch (not part of the deliverable)
+.superpowers/
+.cursor/
+
+# Handoff doc (never commit)
+HANDOFF.md
