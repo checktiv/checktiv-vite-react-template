@@ -1,0 +1,31 @@
+# What this teaches / copy this pattern:
+# Template for `.dev.vars` - the LOCAL-DEV Worker runtime secrets/vars file that
+# Wrangler loads into `env` during `pnpm dev`. Copy this to `.dev.vars` and fill in
+# real local values. `.dev.vars` is gitignored (never commit it); this `.example`
+# is the committed, secret-free documentation of what the Worker reads.
+#
+# For the DEPLOYED Worker these are set differently:
+#   - AUTH_COOKIE_SECRET -> `wrangler secret put AUTH_COOKIE_SECRET`
+#     (a deploy-time HUMAN action; NEVER commit the value, NEVER a `VITE_` var).
+#     The deployed env is selected at build via CLOUDFLARE_ENV, so `--env` is not
+#     used here.
+#   - PUBLIC_ORIGIN / DEMO_ALLOW_DECIDE -> `env.production.vars` in wrangler.jsonc.
+
+# HMAC secret that signs the mock staff-session cookie (src/worker/auth.ts).
+# The auth gate FAILS CLOSED (structured 500) if this is unset, so local dev needs
+# it. Generate a random value, e.g. `openssl rand -hex 32`. This is a CLEARLY-FAKE
+# placeholder - replace it; never ship this literal.
+AUTH_COOKIE_SECRET=replace-with-openssl-rand-hex-32
+
+# Authoritative `workspace_token` `origin` body field. Set this to your registered
+# workspace origin (the named-tunnel hostname in local dev, e.g.
+# https://your-tunnel.example.com - replace with your own public tunnel/host).
+# Leave UNSET to fall back to the incoming browser `Origin` header (the
+# tunnel-loaded staff page forwards the registered origin). Deployed value lives
+# in `env.production.vars` (https://sdk-demo.checktiv.com).
+# PUBLIC_ORIGIN=https://your-tunnel.example.com
+
+# Set to "true" to grant the TEST-MODE-ONLY `session:decide` reviewer capability
+# so the embedded reviewer can record a decision. Omit (the default) for the
+# READ-only capability subset. Only ever effective with a TEST key.
+# DEMO_ALLOW_DECIDE=true

@@ -1,0 +1,41 @@
+{
+	"compilerOptions": {
+		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+		"target": "ES2022",
+		"useDefineForClassFields": true,
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"skipLibCheck": true,
+
+		/* Bundler mode */
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"isolatedModules": true,
+		"moduleDetection": "force",
+		"noEmit": true,
+		"jsx": "react-jsx",
+
+		/* shadcn alias parity with vite.config.ts + tsconfig.app.json */
+		"baseUrl": ".",
+		"paths": { "@/*": ["src/react-app/*"] },
+
+		/* Workers-pool test runtime types (`cloudflare:test` module) plus `vite/client`
+		 * (`import.meta.env.VITE_*` typing - `tests/lib/**` has no `vite-env.d.ts`
+		 * triple-slash reference of its own, and this project's explicit `types`
+		 * array means nothing is auto-included, so it must be listed here too). */
+		"types": ["@cloudflare/vitest-pool-workers/types", "vite/client"],
+
+		/* Linting */
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedSideEffectImports": true
+	},
+	// tests/** carries the compile-time contract guards (e.g. a
+	// `const _typecheck: MountOptions = opts`), so this project MUST be in the root
+	// `references` for `tsc -b` to actually type-check it. src/shared/** is included
+	// because the tests import those modules directly. worker-configuration.d.ts
+	// supplies the Worker runtime globals + `Cloudflare.Env` the worker-pool tests use.
+	"include": ["tests", "src/shared", "worker-configuration.d.ts"]
+}

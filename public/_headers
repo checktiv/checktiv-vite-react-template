@@ -1,0 +1,27 @@
+# Security response headers for the deployed demo.
+#
+# Vite copies everything in `public/` into `dist/client`, and Cloudflare Workers
+# static assets honor this `_headers` file, so these headers apply to every
+# served asset.
+#
+# This is a deliberately SAFE baseline. It does NOT set a resource-restricting
+# Content-Security-Policy (`default-src`/`script-src`/`connect-src`/`frame-src`),
+# because the Checktiv browser SDK loads a cross-origin capture iframe and calls
+# the regional sdk-api, and a wrong policy would silently break those flows.
+#
+# To add a full resource CSP later, allow your Checktiv SDK region origins in the
+# relevant directives and test the capture, reviewer, and cross-device flows
+# against a real session before shipping it. The origins to allow are:
+#   connect-src: https://sdk-api.us.checktiv.com https://sdk-api.eu.checktiv.com
+#                https://workspace.us.checktiv.com https://workspace.eu.checktiv.com
+#   frame-src:   the Checktiv capture embed origin (plus the workspace origins above)
+#
+# Note: `Permissions-Policy` intentionally does NOT restrict `camera` - the SDK
+# capture iframe needs camera access.
+/*
+  Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'
+  X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), payment=(), usb=()
