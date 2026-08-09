@@ -263,7 +263,7 @@ describe("SetupForm (bring-your-own-key bootstrap)", () => {
 		expect(screen.getByText("Reservations Home")).toBeInTheDocument();
 	});
 
-	it("keeps IDV + server-side-check templates, filters out only collect_user_info ones", async () => {
+	it("keeps IDV + server-side-check templates, filters out only custom_form ones", async () => {
 		const mixed: WorkflowTemplateSummary[] = [
 			{
 				id: "wt_idv_watchlist",
@@ -274,12 +274,12 @@ describe("SetupForm (bring-your-own-key bootstrap)", () => {
 				checkTypes: ["id_verification", "watchlist"],
 			},
 			{
-				id: "wt_with_collect",
-				name: "IDV plus info collection",
+				id: "wt_with_custom_form",
+				name: "IDV plus custom form",
 				isActive: true,
 				isDefault: false,
-				// collect_user_info is applicant-rendered + unsupported -> filtered.
-				checkTypes: ["id_verification", "collect_user_info"],
+				// custom_form is applicant-rendered + unsupported -> filtered.
+				checkTypes: ["id_verification", "custom_form"],
 			},
 		];
 		const fetchTemplates = vi.fn<FetchTemplates>().mockResolvedValue(mixed);
@@ -288,9 +288,9 @@ describe("SetupForm (bring-your-own-key bootstrap)", () => {
 
 		const select = await screen.findByLabelText("Workflow template");
 		expect(select.tagName).toBe("SELECT");
-		// The IDV + watchlist template is offered; only the collect_user_info one is filtered.
+		// The IDV + watchlist template is offered; only the custom_form one is filtered.
 		expect(screen.getByRole("option", { name: /idv plus watchlist/i })).toBeInTheDocument();
-		expect(screen.queryByRole("option", { name: /idv plus info collection/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole("option", { name: /idv plus custom form/i })).not.toBeInTheDocument();
 
 		// The pre-selected id is the supported template, so setup completes with it.
 		submit();
@@ -299,21 +299,41 @@ describe("SetupForm (bring-your-own-key bootstrap)", () => {
 		);
 	});
 
-	it("no-compatible state: every template includes collect_user_info -> guidance message, no dropdown", async () => {
+	it("keeps a collect_user_info template now that the collect surface supports it", async () => {
+		const withCollect: WorkflowTemplateSummary[] = [
+			{
+				id: "wt_idv_collect",
+				name: "IDV plus info collection",
+				isActive: true,
+				isDefault: true,
+				// collect_user_info is now demo-supported -> KEPT.
+				checkTypes: ["id_verification", "collect_user_info"],
+			},
+		];
+		const fetchTemplates = vi.fn<FetchTemplates>().mockResolvedValue(withCollect);
+		renderSetup(fetchTemplates);
+		fillKeys(VALID_TEST_KEY, VALID_TEST_PK);
+
+		const select = await screen.findByLabelText("Workflow template");
+		expect(select.tagName).toBe("SELECT");
+		expect(screen.getByRole("option", { name: /idv plus info collection/i })).toBeInTheDocument();
+	});
+
+	it("no-compatible state: every template includes custom_form -> guidance message, no dropdown", async () => {
 		const unsupported: WorkflowTemplateSummary[] = [
 			{
 				id: "wt_full",
 				name: "Full onboarding",
 				isActive: true,
 				isDefault: true,
-				checkTypes: ["id_verification", "collect_user_info"],
+				checkTypes: ["id_verification", "custom_form"],
 			},
 			{
-				id: "wt_collect_watchlist",
-				name: "Info collection plus watchlist",
+				id: "wt_custom_watchlist",
+				name: "Custom form plus watchlist",
 				isActive: true,
 				isDefault: false,
-				checkTypes: ["collect_user_info", "watchlist"],
+				checkTypes: ["custom_form", "watchlist"],
 			},
 		];
 		const fetchTemplates = vi.fn<FetchTemplates>().mockResolvedValue(unsupported);
@@ -321,7 +341,7 @@ describe("SetupForm (bring-your-own-key bootstrap)", () => {
 		fillKeys(VALID_TEST_KEY, VALID_TEST_PK);
 
 		expect(
-			await screen.findByText(/collect_user_info/i),
+			await screen.findByText(/custom_form/i),
 		).toBeInTheDocument();
 		// No dropdown is rendered; the manual `wt_` fallback stays available.
 		expect(screen.queryByLabelText("Workflow template")).not.toBeInTheDocument();

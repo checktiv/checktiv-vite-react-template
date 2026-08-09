@@ -167,6 +167,81 @@ describe("checktivProxy - raw POST /v1/sessions mint", () => {
 	});
 });
 
+describe("checktivProxy - dev-cell targeting (DEV-TEST-ONLY)", () => {
+	it("prod (no CHECKTIV_DEV_CELL): mint targets the key-derived prod host", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(mintEnvelope());
+		const app = checktivProxy({ fetchImpl });
+		await app.request(
+			"/api/checktiv/sessions",
+			{
+				method: "POST",
+				headers: {
+					"X-Checktiv-Key": TEST_KEY,
+					"X-Checktiv-Template": TEMPLATE,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ applicant: { first_name: "A", last_name: "B", email: "a@b.co" } }),
+			},
+			{}, // no CHECKTIV_DEV_CELL
+		);
+		expect(fetchImpl.mock.calls[0][0]).toBe("https://api.us.checktiv.com/v1/sessions");
+	});
+
+	it("CHECKTIV_DEV_CELL=us: mint targets the non-production public-api origin", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(mintEnvelope());
+		const app = checktivProxy({ fetchImpl });
+		await app.request(
+			"/api/checktiv/sessions",
+			{
+				method: "POST",
+				headers: {
+					"X-Checktiv-Key": TEST_KEY,
+					"X-Checktiv-Template": TEMPLATE,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ applicant: { first_name: "A", last_name: "B", email: "a@b.co" } }),
+			},
+			{ CHECKTIV_DEV_CELL: "us" },
+		);
+		expect(fetchImpl.mock.calls[0][0]).toBe("https://api-dev.us.example.test/v1/sessions");
+	});
+
+	it("CHECKTIV_DEV_CELL=us: the status poll ALSO targets the non-production origin", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ data: { id: "vs_1", status: "processing", checks: [] } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		const app = checktivProxy({ fetchImpl });
+		await app.request(
+			"/api/checktiv/sessions/vs_1",
+			{ method: "GET", headers: { "X-Checktiv-Key": TEST_KEY } },
+			{ CHECKTIV_DEV_CELL: "us" },
+		);
+		expect(fetchImpl.mock.calls[0][0]).toBe("https://api-dev.us.example.test/v1/sessions/vs_1");
+	});
+
+	it("an unknown CHECKTIV_DEV_CELL value falls back to the prod host", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(mintEnvelope());
+		const app = checktivProxy({ fetchImpl });
+		await app.request(
+			"/api/checktiv/sessions",
+			{
+				method: "POST",
+				headers: {
+					"X-Checktiv-Key": TEST_KEY,
+					"X-Checktiv-Template": TEMPLATE,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ applicant: { first_name: "A", last_name: "B", email: "a@b.co" } }),
+			},
+			{ CHECKTIV_DEV_CELL: "moon" },
+		);
+		expect(fetchImpl.mock.calls[0][0]).toBe("https://api.us.checktiv.com/v1/sessions");
+	});
+});
+
 describe("checktivProxy - GET /v1/workflow-templates list", () => {
 	it("maps the { data, pagination } envelope to a { templates } display shape", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(templatesEnvelope());

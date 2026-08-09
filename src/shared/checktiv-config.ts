@@ -160,12 +160,22 @@ export function isValidWorkflowTemplateId(id: string): boolean {
  * (`@checktiv/sdk-web/idv`) plus the consent-gated fraud signal. Server-side checks
  * (`watchlist`, `background_us_criminal`, `background_global`) run WITHOUT an
  * applicant screen, so a template that pairs them with `id_verification` runs fine
- * and is NOT filtered. `collect_user_info` and `custom_form` are applicant-rendered
- * steps this demo does not import (`@checktiv/sdk-web/custom-form` is not loaded), so
- * a template that includes either would reach a step the SDK cannot mount
- * (`sdk_load_failed`); Setup blocks those.
+ * and is NOT filtered.
+ *
+ * `collect_user_info` is now demonstrated INSIDE the guest check-in journey
+ * (`CheckInPage` -> `CheckInCollectForm`): before the SDK identity journey mounts,
+ * the demo renders a prefilled "confirm your details" form and submits the applicant
+ * info programmatically via `@checktiv/sdk-web/collect-user-info`. So the demo DOES
+ * support the check type paired with `id_verification` and it is no longer filtered
+ * here. This demo satisfies `collect_user_info` with a developer-owned form, whose
+ * `submit()` resolves against the session (or reports `not_collect_step` when the
+ * session has no such step, so a template without it is unaffected).
+ *
+ * `custom_form` remains applicant-rendered + not imported (`@checktiv/sdk-web/custom-form`
+ * is not loaded), so a template including it would reach a step the SDK cannot mount
+ * (`sdk_load_failed`); Setup keeps blocking it.
  */
-export const DEMO_UNSUPPORTED_CHECK_TYPES = ["collect_user_info", "custom_form"] as const;
+export const DEMO_UNSUPPORTED_CHECK_TYPES = ["custom_form"] as const;
 
 /**
  * True when a template can run in this demo: it includes NONE of the

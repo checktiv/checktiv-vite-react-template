@@ -72,9 +72,10 @@
  * wants. Because the overlay can also dead-end mid-flow (the session dies on the
  * phone, or the completion poll caps out), `onEvent` recovers both so the desktop is
  * never a silent dead-end: a `session_expired` error routes to the terminal failure
- * surface, and `checktiv.idv.cross_device_capped` surfaces a "still waiting" hint
- * WITHOUT tearing the journey down (the overlay stays mounted so the phone can still
- * finish).
+ * surface, and `checktiv.idv.cross_device_capped` surfaces a RECOVERABLE "still waiting"
+ * hint WITHOUT tearing the journey down (the overlay stays mounted so the phone can still
+ * finish) - with a "Keep checking" control that re-arms a fresh completion poll via
+ * `openCrossDevice()` (never a reload, which would 404 the null-cursor mount plane).
  *
  * The `@checktiv/sdk-web/idv` + `/fraud` side-effect imports self-register the
  * journey modules the session's workflow template provisions; without them the SDK
@@ -100,6 +101,11 @@ import type { ChecktivEvent, ChecktivIdvEvent, CrossDeviceCopy } from "@checktiv
 import { isValidPublishableKey } from "../../shared/checktiv-config";
 import { Footer } from "../components/Footer";
 import { Button } from "../components/ui/button";
+import {
+	CheckInCollectForm,
+	type CheckInCollectPrefill,
+} from "../components/CheckInCollectForm";
+import { devCellSdkApiBase } from "../lib/dev-cell";
 
 /** The durable capability threaded to the SDK: the token plus the cell's pk. */
 interface CheckInScope {
@@ -192,12 +198,33 @@ function isTerminalError(event: ChecktivEvent): boolean {
 	return event.error.recoverable === false || event.error.code === "session_expired";
 }
 
+/** Narrow an event to the IDV "processing" arm (the only arm carrying an optional `reason`). */
+function isIdvProcessing(
+	event: ChecktivEvent,
+): event is Extract<ChecktivIdvEvent, { type: "checktiv.idv.processing" }> {
+	return event.type === "checktiv.idv.processing";
+}
+
+/**
+ * The applicant has nothing left to do on screen. The SDK emits a NON-error
+ * `checktiv.idv.processing` with `reason: "no_renderable_step"` when the current step is a
+ * server-side-only check (e.g. a background check) that has no applicant UI: the details are
+ * already submitted and verification now runs on its own. This is TERMINAL for the applicant.
+ * The other `reason` (`"signal_pending"`, or a reasonless legacy processing event) is a
+ * transient reload-safe race and is DELIBERATELY excluded, so it never routes here.
+ */
+function isNoRenderableStep(event: ChecktivEvent): boolean {
+	return isIdvProcessing(event) && event.reason === "no_renderable_step";
+}
+
 /**
  * The cross-device completion poll reached its time cap without the phone finishing.
  * Per the SDK contract this is NOT an error and NOT a verdict: the SDK keeps its QR
  * overlay mounted so the applicant can still finish on their phone. The host surfaces a
  * "still waiting" hint rather than treating it as failure, so it is complementary to
- * `terminal` (never terminal itself).
+ * `terminal` (never terminal itself). At the cap the SDK STOPS polling, so the hint is
+ * RECOVERABLE: a "Keep checking" control re-arms a fresh poll via `openCrossDevice()`
+ * (see `rearmCrossDevice`), never a page reload.
  */
 function isCrossDeviceCapped(event: ChecktivEvent): boolean {
 	return event.type === "checktiv.idv.cross_device_capped";
@@ -249,6 +276,51 @@ function resolveScope(id: string | undefined, hash: string): CheckInScope | null
 	return parseHashScope(hash) ?? readStash(id);
 }
 
+/**
+ * Split a full guest name into a best-effort first / last for the prefilled name row.
+ * The guest reviews and edits it, so an imperfect split is fine: the first whitespace
+ * token is the first name, the remainder (if any) is the last name.
+ */
+function splitGuestName(fullName: string): { first: string; last: string } {
+	const parts = fullName.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return { first: "", last: "" };
+	if (parts.length === 1) return { first: parts[0], last: "" };
+	return { first: parts[0], last: parts.slice(1).join(" ") };
+}
+
+/** Build the collect prefill from a guest-safe reservation read (empty when absent). */
+function toPrefill(data: { guestName: string; guestEmail: string } | null): CheckInCollectPrefill {
+	if (!data) return { legalName: "", first: "", last: "", email: "" };
+	const { first, last } = splitGuestName(data.guestName);
+	return { legalName: data.guestName, first, last, email: data.guestEmail };
+}
+
+/**
+ * Fetch the guest-safe prefill for this reservation from the same-origin worker
+ * (`GET /api/checkin/:id` -> `{ guestName, guestEmail }`). This is a convenience only:
+ * any failure (deployed no-D1 shape returns 501, an unknown id returns 404, a network
+ * error, or a malformed body) resolves to `null` so the collect form renders with empty
+ * fields the guest fills in - it NEVER blocks the journey.
+ */
+async function fetchCheckInPrefill(
+	id: string,
+): Promise<{ guestName: string; guestEmail: string } | null> {
+	try {
+		const res = await fetch(`/api/checkin/${encodeURIComponent(id)}`, {
+			headers: { accept: "application/json" },
+		});
+		if (!res.ok) return null;
+		const body: unknown = await res.json();
+		if (typeof body !== "object" || body === null) return null;
+		const record = body as Record<string, unknown>;
+		const guestName = typeof record.guestName === "string" ? record.guestName : "";
+		const guestEmail = typeof record.guestEmail === "string" ? record.guestEmail : "";
+		return { guestName, guestEmail };
+	} catch {
+		return null;
+	}
+}
+
 export default function CheckInPage() {
 	const { id } = useParams();
 	const location = useLocation();
@@ -260,8 +332,18 @@ export default function CheckInPage() {
 	const [scope] = useState<CheckInScope | null>(() => resolveScope(id, location.hash));
 	// Terminal outcomes the SDK drives via its callbacks: `complete` on
 	// `checktiv.idv.submitted` / `onComplete`, `error` on a non-recoverable IDV error
-	// (or a `session_expired`, e.g. a cross-device handoff that died on the phone).
-	const [terminal, setTerminal] = useState<"complete" | "error" | null>(null);
+	// (or a `session_expired`, e.g. a cross-device handoff that died on the phone), and
+	// `submitted` on a `checktiv.idv.processing` with `reason: "no_renderable_step"` (the
+	// details are in and the next check runs server-side with no applicant screen).
+	const [terminal, setTerminal] = useState<"complete" | "error" | "submitted" | null>(null);
+	// The collect gate that precedes the SDK identity journey. The applicant confirms
+	// their details (prefilled from the reservation) and the SDK submits them; only then
+	// does `<ChecktivJourney>` mount. `prefill` is the guest-safe reservation read;
+	// `prefillReady` flips once that fetch settles (resolved OR failed) so the form seeds
+	// its fields exactly once. A failed/absent prefill still readies the form (empty).
+	const [collectDone, setCollectDone] = useState(false);
+	const [prefill, setPrefill] = useState<CheckInCollectPrefill>(() => toPrefill(null));
+	const [prefillReady, setPrefillReady] = useState(false);
 	// The cross-device completion poll capped out while the SDK overlay is still open.
 	// Complementary to `terminal` (never terminal): the overlay stays mounted so the
 	// applicant can still finish on their phone; this only surfaces a "still waiting" hint.
@@ -308,6 +390,22 @@ export default function CheckInPage() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [id, scope]);
 
+	// Fetch the guest-safe prefill for the collect gate. Runs once a scope is resolved
+	// (the guest holds a valid link). Any failure resolves to an empty prefill and still
+	// readies the form, so the collect step never blocks on this convenience read.
+	useEffect(() => {
+		if (!id || !scope) return;
+		let cancelled = false;
+		void fetchCheckInPrefill(id).then((data) => {
+			if (cancelled) return;
+			setPrefill(toPrefill(data));
+			setPrefillReady(true);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [id, scope]);
+
 	// `fetchToken` returns the BARE token STRING (the SDK's pinned `() => Promise<string>`
 	// contract). It resolves from `scope` - the durable capability captured SYNCHRONOUSLY
 	// at first render by the lazy `useState` above (fragment on a fresh open, stash on an
@@ -342,6 +440,10 @@ export default function CheckInPage() {
 	// completion signal and sets the same terminal state (idempotent).
 	const onEvent = (event: ChecktivEvent): void => {
 		if (isJourneyComplete(event)) setTerminal("complete");
+		// A server-side-only next step (no applicant UI) is TERMINAL for the applicant: the
+		// details are in and verification runs on its own. NOT an error, and NOT the transient
+		// reload-safe `signal_pending` processing variant (which stays live).
+		else if (isNoRenderableStep(event)) setTerminal("submitted");
 		else if (isTerminalError(event)) setTerminal("error");
 		else if (isCrossDeviceCapped(event)) setStillWaiting(true);
 		// The SDK opened its QR overlay: hide the host trigger so they never compete. The
@@ -352,10 +454,26 @@ export default function CheckInPage() {
 		else if (isCrossDeviceUnavailable(event)) setOverlayOpen(false);
 	};
 
+	// Recover a capped cross-device wait (self-serve, no dead-end). When the completion
+	// poll hits its time cap the SDK STOPS polling (its QR overlay stays mounted, but the
+	// page would no longer auto-update). Re-arm by re-opening cross-device: the SDK mints a
+	// fresh link, remounts the overlay, and starts a NEW completion poll, so the desktop
+	// syncs again once the phone finishes. This is deliberately NOT a page reload: the
+	// zero-lifecycle mount plane on a null cursor (a phone IDV that moved to review) would
+	// 404 -> `session_expired`, a false dead-end. `openCrossDevice()` re-polls the
+	// status endpoint instead.
+	const rearmCrossDevice = (): void => {
+		setStillWaiting(false);
+		journeyRef.current?.openCrossDevice();
+	};
+
 	// Phase is DERIVED from render state: a terminal outcome wins; otherwise a resolvable
-	// scope means the journey is active, and no scope means the link is incomplete.
-	const phase: "complete" | "error" | "no-token" | "active" =
-		terminal ?? (scope ? "active" : "no-token");
+	// scope gates on the collect step first (`collect`) and then the SDK identity journey
+	// (`active`), and no scope means the link is incomplete. The collect gate precedes the
+	// journey mount; it does not replace any of the consent / cross-device / terminal
+	// logic below, which all key off the `active` journey.
+	const phase: "complete" | "error" | "submitted" | "no-token" | "collect" | "active" =
+		terminal ?? (scope ? (collectDone ? "active" : "collect") : "no-token");
 	// The consent card is an overlay gate shown DURING the active journey; a terminal
 	// outcome hides it.
 	const showConsent = consentPending && terminal === null;
@@ -385,10 +503,17 @@ export default function CheckInPage() {
 					<div className="rounded-md border border-border bg-muted/40 p-4 text-center">
 						<h2 className="text-sm font-medium text-foreground">Still waiting for your phone</h2>
 						<p className="mt-1 text-sm text-muted-foreground">
-							Finish the ID check on your phone using the code on screen. This page will
-							update on its own once you are done. If the code stopped working, choose
-							"Get a new code" on the handoff panel.
+							Finish the ID check on your phone using the code on screen. If you have not
+							finished yet, choose "Keep checking" to reopen the code and keep this page in
+							sync.
 						</p>
+						<button
+							type="button"
+							className="mt-3 inline-flex items-center rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+							onClick={rearmCrossDevice}
+						>
+							Keep checking
+						</button>
 					</div>
 				) : null}
 
@@ -422,6 +547,17 @@ export default function CheckInPage() {
 					</div>
 				) : null}
 
+				{phase === "submitted" ? (
+					<div className="rounded-lg border border-border bg-card p-6 text-center text-card-foreground">
+						<h2 className="text-base font-medium">Details submitted</h2>
+						<p className="mt-2 text-sm text-muted-foreground">
+							Your details were submitted. Verification is now in progress, and nothing
+							more is needed from you right now. The property will reach out if anything
+							else is required. You can close this window.
+						</p>
+					</div>
+				) : null}
+
 				{/*
 				 * The SDK-rendered journey. `<ChecktivJourney>` owns the whole mount/destroy
 				 * lifecycle: rendering it starts the journey, unmounting it (when `phase`
@@ -432,11 +568,38 @@ export default function CheckInPage() {
 				 * supplies the overlay's strings (`onOpenCrossDevice` is deliberately omitted
 				 * so the SDK self-mints the handoff link on the working-token plane).
 				 */}
+				{/*
+				 * The collect gate that precedes the journey: a prefilled "confirm your
+				 * details" form (see `CheckInCollectForm`). The applicant reviews the
+				 * details prefilled from their reservation, adds the rest, and confirms; the
+				 * SDK submits them programmatically. On success (or when the session has no
+				 * collect step, `not_collect_step`) `onComplete` flips `collectDone`, which
+				 * advances the phase to `active` and mounts the journey below. Rendered only
+				 * once the prefill read has settled so the form seeds its fields exactly
+				 * once (a brief, actionable loading line otherwise, never a dead-end).
+				 */}
+				{phase === "collect" && scope ? (
+					prefillReady ? (
+						<CheckInCollectForm
+							publishableKey={scope.publishableKey}
+							fetchToken={fetchToken}
+							sdkApiBase={devCellSdkApiBase()}
+							prefill={prefill}
+							onComplete={() => setCollectDone(true)}
+						/>
+					) : (
+						<div className="rounded-md border border-border bg-muted/40 p-4 text-center text-sm text-muted-foreground">
+							Loading your details...
+						</div>
+					)
+				) : null}
+
 				{phase === "active" && scope ? (
 					<ChecktivJourney
 						ref={journeyRef}
 						publishableKey={scope.publishableKey}
 						fetchToken={fetchToken}
+						apiBase={devCellSdkApiBase()}
 						onConsent={onConsent}
 						onEvent={onEvent}
 						onComplete={() => setTerminal("complete")}

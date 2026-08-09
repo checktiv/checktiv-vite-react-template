@@ -140,6 +140,12 @@ async function advance(ms: number) {
 
 beforeEach(() => {
 	vi.useFakeTimers();
+	// This suite asserts the CUSTOM-DOMAIN `workspaceBaseUrl` (from `config-store`)
+	// threads through untouched, so it must be hermetic against the ambient
+	// `VITE_CHECKTIV_DEV_CELL` dev-cell override flag (see `../../src/react-app/lib/dev-cell`)
+	// regardless of what a developer's local `.env` sets for manual dev-cell testing -
+	// same deterministic-env-control rationale as `reservation-store.contract.test.ts`.
+	vi.stubEnv("VITE_CHECKTIV_DEV_CELL", undefined);
 	getSession.mockReset();
 	mintWorkspaceToken.mockReset();
 	mountReviewer.mockReset();
@@ -160,6 +166,7 @@ afterEach(() => {
 	cleanup();
 	vi.clearAllTimers();
 	vi.useRealTimers();
+	vi.unstubAllEnvs();
 });
 
 // -- tests -------------------------------------------------------------------
@@ -320,6 +327,18 @@ describe("ReservationDetailPage - reviewer embed", () => {
 			workspaceBaseUrl: WORKSPACE_BASE_URL,
 		});
 		expect(typeof input.getToken).toBe("function");
+	});
+
+	it("threads the dev-cell workspace override AHEAD OF the custom-domain workspaceBaseUrl when the dev-cell flag is set", async () => {
+		vi.stubEnv("VITE_CHECKTIV_DEV_CELL", "us");
+		getSession.mockResolvedValue({ id: "vs_abc123", status: "awaiting_review", checks: [] });
+		renderDetail();
+		await flush();
+		expect(mountReviewer).toHaveBeenCalledTimes(1);
+		const [, input] = mountReviewer.mock.calls[0];
+		expect(input).toMatchObject({
+			workspaceBaseUrl: "https://workspace-dev.us.example.test",
+		});
 	});
 
 	it("getToken resolves reviewer tokens via mintWorkspaceToken", async () => {

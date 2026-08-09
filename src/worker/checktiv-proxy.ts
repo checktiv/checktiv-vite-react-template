@@ -17,6 +17,14 @@
  * `origin` BODY field (a Checktiv field a mismatch merely 422s upstream, NOT the
  * resolved host) - see `resolveWorkspaceOrigin`.
  *
+ * DEV-TEST-ONLY exception: when the SERVER env var `CHECKTIV_DEV_CELL` is set (never
+ * a request/user value), `effectiveApiBase` targets a compile-time-constant dev-cell
+ * public-api origin (see `shared/dev-cell.ts`) instead of the key-derived prod host.
+ * This is the env-gated hook that lets the demo exercise the `collect_user_info`
+ * submit path against a non-production cell. It is OFF by default (unset), so
+ * the prod path is byte-unchanged, and the override origin is still a static constant,
+ * not attacker-controlled. Env-unset before finalizing the public demo.
+ *
  * Why raw `POST /v1/sessions` instead of `Checktiv.sessions.create`: the SDK returns
  * only `{ clientToken }` and cannot carry `expected_outcome`, but the demo needs the
  * full `{ data: SessionResponse }` (`id`/`status`/`short_code`/`applicant_url`) to
@@ -34,6 +42,7 @@ import {
 	InvalidKeyError,
 	type KeyContext,
 } from "../shared/checktiv-config";
+import { resolveDevCellOrigins } from "../shared/dev-cell";
 
 /** Default upstream timeout; a Checktiv call is aborted past this and maps to 504. */
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -66,6 +75,14 @@ interface ProxyEnv {
 	PUBLIC_ORIGIN?: string;
 	/** `'true'` opts the demo into granting `session:decide` (test mode only). */
 	DEMO_ALLOW_DECIDE?: string;
+	/**
+	 * DEV-TEST-ONLY cell-targeting flag (e.g. `"us"`). Unset in prod (byte-unchanged).
+	 * When set, every upstream call targets the compile-time-constant dev-cell
+	 * public-api origin (see `shared/dev-cell.ts`) instead of the key-derived prod
+	 * host - used to exercise the `collect_user_info` submit path against a
+	 * non-production cell. Never request/user-derived. Env-unset before finalizing.
+	 */
+	CHECKTIV_DEV_CELL?: string;
 }
 
 /** Narrow fetch signature the proxy needs; DI so tests can stub the upstream. */
@@ -109,9 +126,13 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 			return c.json({ error: resolved.error, code: resolved.code, status: 401 }, 401);
 		}
 		const { key, ctx } = resolved;
+		const apiBase = effectiveApiBase(ctx, c.env);
 
 		const body = await readJsonBody(c.req.raw);
 		const applicant = body?.applicant;
+		// The workflow template id is a `wt_` id sourced from the `X-Checktiv-Template`
+		// header (set by every client call) or, as a fallback, the request body. The
+		// applicant journey is provisioned entirely from the session's template.
 		const workflowTemplateId =
 			c.req.header("X-Checktiv-Template") ??
 			(typeof body?.workflowTemplateId === "string" ? body.workflowTemplateId : undefined);
@@ -131,15 +152,12 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 		// ONLY synthetic-verdict hint: forward it only when present AND the key is a
 		// test key; a live key drops it (defense-in-depth - a stale live value would
 		// otherwise 422 upstream instead of cleanly no-op'ing).
-		const wire: Record<string, unknown> = {
-			workflow_template_id: workflowTemplateId,
-			applicant,
-		};
+		const wire: Record<string, unknown> = { applicant, workflow_template_id: workflowTemplateId };
 		if (ctx.mode === "test" && typeof body?.expectedOutcome === "string") {
 			wire.expected_outcome = body.expectedOutcome;
 		}
 
-		const outcome = await callUpstream(fetchImpl, timeoutMs, `${ctx.apiBase}/v1/sessions`, {
+		const outcome = await callUpstream(fetchImpl, timeoutMs, `${apiBase}/v1/sessions`, {
 			key,
 			method: "POST",
 			body: wire,
@@ -164,6 +182,7 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 			return c.json({ error: resolved.error, code: resolved.code, status: 401 }, 401);
 		}
 		const { key, ctx } = resolved;
+		const apiBase = effectiveApiBase(ctx, c.env);
 
 		const sessionId = c.req.param("id");
 		if (!SESSION_ID_RE.test(sessionId)) {
@@ -186,7 +205,7 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 		const outcome = await callUpstream(
 			fetchImpl,
 			timeoutMs,
-			`${ctx.apiBase}/v1/sessions/${encodeURIComponent(sessionId)}/workspace_token`,
+			`${apiBase}/v1/sessions/${encodeURIComponent(sessionId)}/workspace_token`,
 			{ key, method: "POST", body: { origin, actor: DEMO_ACTOR, capabilities } },
 		);
 		if (outcome.kind !== "ok") {
@@ -214,11 +233,12 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 			return c.json({ error: resolved.error, code: resolved.code, status: 401 }, 401);
 		}
 		const { key, ctx } = resolved;
+		const apiBase = effectiveApiBase(ctx, c.env);
 
 		const outcome = await callUpstream(
 			fetchImpl,
 			timeoutMs,
-			`${ctx.apiBase}/v1/workflow-templates?limit=100`,
+			`${apiBase}/v1/workflow-templates?limit=100`,
 			{ key, method: "GET" },
 		);
 		if (outcome.kind !== "ok") {
@@ -252,6 +272,7 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 			return c.json({ error: resolved.error, code: resolved.code, status: 401 }, 401);
 		}
 		const { key, ctx } = resolved;
+		const apiBase = effectiveApiBase(ctx, c.env);
 
 		const sessionId = c.req.param("id");
 		if (!SESSION_ID_RE.test(sessionId)) {
@@ -264,7 +285,7 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 		const outcome = await callUpstream(
 			fetchImpl,
 			timeoutMs,
-			`${ctx.apiBase}/v1/sessions/${encodeURIComponent(sessionId)}`,
+			`${apiBase}/v1/sessions/${encodeURIComponent(sessionId)}`,
 			{ key, method: "GET" },
 		);
 		if (outcome.kind !== "ok") {
@@ -319,6 +340,24 @@ function resolveKey(key: string | undefined): KeyResolution {
 		return { ok: false, error: "Refusing to call a non-Checktiv host.", code: "invalid_key" };
 	}
 	return { ok: true, key, ctx };
+}
+
+/**
+ * Resolve the upstream public-api base for this request. Prod path: the
+ * key-derived `ctx.apiBase` (asserted `*.checktiv.com` in `resolveKey`).
+ * DEV-TEST-ONLY: when the SERVER env `CHECKTIV_DEV_CELL` selects a dev cell, use
+ * that cell's compile-time-constant public-api origin instead (see
+ * `shared/dev-cell.ts`). The override host intentionally bypasses the
+ * `.checktiv.com` pin because it is a trusted static constant chosen by a server
+ * env flag, NEVER by request/user input, so it introduces no SSRF surface. Unset
+ * (the default) returns the prod origin unchanged.
+ */
+function effectiveApiBase(ctx: KeyContext, env: ProxyEnv | undefined): string {
+	// `env` is always present at runtime (Cloudflare provides it), but a Hono
+	// `app.request(path, init)` with no third arg leaves it undefined - guard so the
+	// prod path never throws on a missing env.
+	const devCell = resolveDevCellOrigins(env?.CHECKTIV_DEV_CELL);
+	return devCell ? devCell.apiBase : ctx.apiBase;
 }
 
 /**

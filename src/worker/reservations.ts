@@ -209,6 +209,34 @@ export function reservationsRoute(): Hono<{ Bindings: ReservationsEnv }> {
 		return c.json(toReservation(rows[0]));
 	});
 
+	/**
+	 * GUEST-SAFE prefill read for the check-in collect step. Returns ONLY the
+	 * `{ guestName, guestEmail }` for one reservation - never the secret key, session
+	 * id, or any other row - so the applicant's "confirm your details" form
+	 * (`CheckInCollectForm`) can prefill legal name + email.
+	 *
+	 * Deliberately NOT staff-gated: the guest never authenticates, and holding the
+	 * check-in link (which carries the durable token in its fragment) is the capability,
+	 * exactly like the guest journey itself. It is mounted OUTSIDE the `/api/reservations`
+	 * `requireStaff` prefix in `index.ts` for that reason. Reservation ids are UUIDs
+	 * (`crypto.randomUUID()` on create), so `:id` is not an enumerable leak. This is a
+	 * DEMO-GRADE capability that rides on the demo's already-mock auth (see `AGENTS.md`
+	 * "Out of scope"); a production integration would authenticate the guest and scope
+	 * this read to their own reservation. In the deployed no-D1 shape this returns the
+	 * structured 501 and the collect form falls back to empty fields (the guest fills
+	 * them in), so prefill absence never blocks check-in.
+	 */
+	app.get("/api/checkin/:id", async (c) => {
+		if (!c.env.DB) return notAvailableResponse(c);
+		const db = drizzle(c.env.DB);
+		const rows = await db
+			.select()
+			.from(reservations)
+			.where(eq(reservations.id, c.req.param("id")));
+		if (rows.length === 0) return notFoundResponse(c);
+		return c.json({ guestName: rows[0].guestName, guestEmail: rows[0].guestEmail });
+	});
+
 	app.post("/api/reservations", async (c) => {
 		if (!c.env.DB) return notAvailableResponse(c);
 		const parsed = parseNewReservation(await c.req.json().catch(() => null));
