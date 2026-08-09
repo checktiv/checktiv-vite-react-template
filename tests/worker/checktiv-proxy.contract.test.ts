@@ -167,7 +167,7 @@ describe("checktivProxy - raw POST /v1/sessions mint", () => {
 	});
 });
 
-describe("checktivProxy - dev-cell targeting (CT-377, DEV-TEST-ONLY)", () => {
+describe("checktivProxy - dev-cell targeting (DEV-TEST-ONLY)", () => {
 	it("prod (no CHECKTIV_DEV_CELL): mint targets the key-derived prod host", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(mintEnvelope());
 		const app = checktivProxy({ fetchImpl });
@@ -187,7 +187,7 @@ describe("checktivProxy - dev-cell targeting (CT-377, DEV-TEST-ONLY)", () => {
 		expect(fetchImpl.mock.calls[0][0]).toBe("https://api.us.checktiv.com/v1/sessions");
 	});
 
-	it("CHECKTIV_DEV_CELL=us: mint targets the dev-us public-api origin", async () => {
+	it("CHECKTIV_DEV_CELL=us: mint targets the non-production public-api origin", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(mintEnvelope());
 		const app = checktivProxy({ fetchImpl });
 		await app.request(
@@ -203,10 +203,10 @@ describe("checktivProxy - dev-cell targeting (CT-377, DEV-TEST-ONLY)", () => {
 			},
 			{ CHECKTIV_DEV_CELL: "us" },
 		);
-		expect(fetchImpl.mock.calls[0][0]).toBe("https://api-dev.us.autohost-dev.uk/v1/sessions");
+		expect(fetchImpl.mock.calls[0][0]).toBe("https://api-dev.us.example.test/v1/sessions");
 	});
 
-	it("CHECKTIV_DEV_CELL=us: the status poll ALSO targets the dev-us origin", async () => {
+	it("CHECKTIV_DEV_CELL=us: the status poll ALSO targets the non-production origin", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify({ data: { id: "vs_1", status: "processing", checks: [] } }), {
 				status: 200,
@@ -219,7 +219,7 @@ describe("checktivProxy - dev-cell targeting (CT-377, DEV-TEST-ONLY)", () => {
 			{ method: "GET", headers: { "X-Checktiv-Key": TEST_KEY } },
 			{ CHECKTIV_DEV_CELL: "us" },
 		);
-		expect(fetchImpl.mock.calls[0][0]).toBe("https://api-dev.us.autohost-dev.uk/v1/sessions/vs_1");
+		expect(fetchImpl.mock.calls[0][0]).toBe("https://api-dev.us.example.test/v1/sessions/vs_1");
 	});
 
 	it("an unknown CHECKTIV_DEV_CELL value falls back to the prod host", async () => {

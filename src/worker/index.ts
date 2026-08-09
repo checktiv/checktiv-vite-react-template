@@ -81,8 +81,9 @@ declare global {
 			 * `wrangler types`) because it is intentionally UNSET in every environment's
 			 * `vars` so the prod relay is byte-unchanged; a deployer sets it via
 			 * `.dev.vars` (local) or a TEMPORARY `env.production.vars` entry only while
-			 * validating the CT-377 `collect_user_info` submit path against dev-us. When
-			 * set, the proxy targets the dev cell public-api (see `shared/dev-cell.ts`).
+			 * exercising the `collect_user_info` submit path against a non-production
+			 * cell. When set, the proxy targets that cell's public-api (see
+			 * `shared/dev-cell.ts`).
 			 * Env-unset before finalizing the public demo. Documented in
 			 * `.dev.vars.example`.
 			 */

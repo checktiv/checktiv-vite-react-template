@@ -5,17 +5,17 @@ import { devCellWorkspaceBaseUrl } from "../../src/react-app/lib/dev-cell";
 describe("resolveDevCellOrigins (env-flag -> static dev-cell origins)", () => {
 	it("resolves the us dev cell to its compile-time-constant origins", () => {
 		expect(resolveDevCellOrigins("us")).toEqual({
-			sdkApiBase: "https://sdk-api-dev.us.autohost-dev.uk",
-			apiBase: "https://api-dev.us.autohost-dev.uk",
-			workspaceBaseUrl: "https://workspace-dev.us.autohost-dev.uk",
+			sdkApiBase: "https://sdk-api-dev.us.example.test",
+			apiBase: "https://api-dev.us.example.test",
+			workspaceBaseUrl: "https://workspace-dev.us.example.test",
 		});
 	});
 
 	it("is case- and whitespace-insensitive", () => {
 		const expected = {
-			sdkApiBase: "https://sdk-api-dev.us.autohost-dev.uk",
-			apiBase: "https://api-dev.us.autohost-dev.uk",
-			workspaceBaseUrl: "https://workspace-dev.us.autohost-dev.uk",
+			sdkApiBase: "https://sdk-api-dev.us.example.test",
+			apiBase: "https://api-dev.us.example.test",
+			workspaceBaseUrl: "https://workspace-dev.us.example.test",
 		};
 		expect(resolveDevCellOrigins("US")).toEqual(expected);
 		expect(resolveDevCellOrigins("  us  ")).toEqual(expected);
@@ -29,12 +29,12 @@ describe("resolveDevCellOrigins (env-flag -> static dev-cell origins)", () => {
 		expect(resolveDevCellOrigins("prod")).toBeNull();
 	});
 
-	it("only ever returns a static autohost-dev.uk host (no request-derived origin)", () => {
+	it("only ever returns a static example.test host (no request-derived origin)", () => {
 		const resolved = resolveDevCellOrigins("us");
 		expect(resolved).not.toBeNull();
-		expect(new URL(resolved!.apiBase).hostname.endsWith(".autohost-dev.uk")).toBe(true);
-		expect(new URL(resolved!.sdkApiBase).hostname.endsWith(".autohost-dev.uk")).toBe(true);
-		expect(new URL(resolved!.workspaceBaseUrl).hostname.endsWith(".autohost-dev.uk")).toBe(
+		expect(new URL(resolved!.apiBase).hostname.endsWith(".example.test")).toBe(true);
+		expect(new URL(resolved!.sdkApiBase).hostname.endsWith(".example.test")).toBe(true);
+		expect(new URL(resolved!.workspaceBaseUrl).hostname.endsWith(".example.test")).toBe(
 			true,
 		);
 	});
@@ -51,7 +51,7 @@ describe("devCellWorkspaceBaseUrl (client reader)", () => {
 
 	it("returns the us dev-cell workspace origin when the flag is set", () => {
 		vi.stubEnv("VITE_CHECKTIV_DEV_CELL", "us");
-		expect(devCellWorkspaceBaseUrl()).toBe("https://workspace-dev.us.autohost-dev.uk");
+		expect(devCellWorkspaceBaseUrl()).toBe("https://workspace-dev.us.example.test");
 	});
 
 	it("returns undefined (prod behavior) when the flag is unset", () => {

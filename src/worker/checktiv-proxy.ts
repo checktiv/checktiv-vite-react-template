@@ -20,8 +20,8 @@
  * DEV-TEST-ONLY exception: when the SERVER env var `CHECKTIV_DEV_CELL` is set (never
  * a request/user value), `effectiveApiBase` targets a compile-time-constant dev-cell
  * public-api origin (see `shared/dev-cell.ts`) instead of the key-derived prod host.
- * This is the env-gated hook that lets the demo validate the unpublished CT-377
- * `collect_user_info` submit path against dev-us. It is OFF by default (unset), so
+ * This is the env-gated hook that lets the demo exercise the `collect_user_info`
+ * submit path against a non-production cell. It is OFF by default (unset), so
  * the prod path is byte-unchanged, and the override origin is still a static constant,
  * not attacker-controlled. Env-unset before finalizing the public demo.
  *
@@ -79,8 +79,8 @@ interface ProxyEnv {
 	 * DEV-TEST-ONLY cell-targeting flag (e.g. `"us"`). Unset in prod (byte-unchanged).
 	 * When set, every upstream call targets the compile-time-constant dev-cell
 	 * public-api origin (see `shared/dev-cell.ts`) instead of the key-derived prod
-	 * host - used to validate the unpublished CT-377 `collect_user_info` submit path
-	 * against dev-us. Never request/user-derived. Env-unset before finalizing.
+	 * host - used to exercise the `collect_user_info` submit path against a
+	 * non-production cell. Never request/user-derived. Env-unset before finalizing.
 	 */
 	CHECKTIV_DEV_CELL?: string;
 }

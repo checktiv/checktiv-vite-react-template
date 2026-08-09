@@ -85,8 +85,8 @@ describe("isTemplateDemoSupported (blocks only custom_form)", () => {
 	it("true for server-side checks only (no applicant-rendered blocker)", () => {
 		expect(isTemplateDemoSupported(["watchlist"])).toBe(true);
 	});
-	it("true for collect_user_info now that the collect surface (mode b) supports it", () => {
-		// CT-377: `collect_user_info` is demonstrated by the /collect surface, so it is
+	it("true for collect_user_info now that the collect surface supports it", () => {
+		// `collect_user_info` is demonstrated by the /collect surface, so it is
 		// no longer a demo-unsupported step.
 		expect(isTemplateDemoSupported(["collect_user_info"])).toBe(true);
 		expect(isTemplateDemoSupported(["id_verification", "collect_user_info"])).toBe(true);

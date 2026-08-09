@@ -1,6 +1,6 @@
 /**
  * What this teaches / copy this pattern:
- * The "bring your own form" applicant-info step (CT-377 mode b) wired INTO the guest
+ * The "bring your own form" applicant-info step wired INTO the guest
  * check-in journey. A developer who owns their OWN form and PII handling supplies the
  * applicant's details PROGRAMMATICALLY via `@checktiv/sdk-web/collect-user-info`,
  * instead of mounting an SDK-rendered form. This component renders a prefilled,
@@ -42,8 +42,8 @@
  * DEV-TEST-ONLY dev-cell targeting: `sdkApiBase` for the SDK data-plane comes from the
  * build-time `VITE_CHECKTIV_DEV_CELL` flag via `devCellSdkApiBase()` (see
  * `lib/dev-cell.ts`), passed down by `CheckInPage`, and is `undefined` (prod) by
- * default. This is how the harness validates the unpublished submit path against dev-us
- * before the SDK is published.
+ * default. This is how the harness points the SDK at a non-production API for
+ * local testing of the submit path.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {

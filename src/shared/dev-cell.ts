@@ -6,8 +6,8 @@
  * construction: every origin the demo talks to is derived from the key's region
  * and pinned to `*.checktiv.com` (see `origins.ts` / the SSRF note in
  * `checktiv-proxy.ts`). This module is the single, deliberate exception used to
- * validate an UNPUBLISHED SDK capability (CT-377 `collect_user_info` mode b)
- * against the dev-us cell BEFORE the SDK is published.
+ * point the demo at a NON-production Checktiv cell for local testing of the
+ * `collect_user_info` submit path.
  *
  * SSRF-safe by construction: the override origins are COMPILE-TIME CONSTANTS in
  * the static `DEV_CELLS` table below and are selected ONLY by a build-time /
@@ -47,12 +47,15 @@ export interface DevCellOrigins {
  * Static, compile-time table of dev-cell origins keyed by flag value. The ONLY
  * source of override origins - nothing here is request-derived. Add a cell here
  * (never accept an origin from user input).
+ *
+ * The hosts below are PLACEHOLDERS on the reserved `.example.test` TLD. Replace
+ * them with your own non-production cell's origins for local testing.
  */
 const DEV_CELLS: Record<string, DevCellOrigins> = {
 	us: {
-		sdkApiBase: "https://sdk-api-dev.us.autohost-dev.uk",
-		apiBase: "https://api-dev.us.autohost-dev.uk",
-		workspaceBaseUrl: "https://workspace-dev.us.autohost-dev.uk",
+		sdkApiBase: "https://sdk-api-dev.us.example.test",
+		apiBase: "https://api-dev.us.example.test",
+		workspaceBaseUrl: "https://workspace-dev.us.example.test",
 	},
 };
 

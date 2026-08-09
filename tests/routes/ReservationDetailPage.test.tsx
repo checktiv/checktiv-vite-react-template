@@ -337,7 +337,7 @@ describe("ReservationDetailPage - reviewer embed", () => {
 		expect(mountReviewer).toHaveBeenCalledTimes(1);
 		const [, input] = mountReviewer.mock.calls[0];
 		expect(input).toMatchObject({
-			workspaceBaseUrl: "https://workspace-dev.us.autohost-dev.uk",
+			workspaceBaseUrl: "https://workspace-dev.us.example.test",
 		});
 	});
 

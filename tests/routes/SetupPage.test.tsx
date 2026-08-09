@@ -299,14 +299,14 @@ describe("SetupForm (bring-your-own-key bootstrap)", () => {
 		);
 	});
 
-	it("keeps a collect_user_info template now that the collect surface supports it (CT-377)", async () => {
+	it("keeps a collect_user_info template now that the collect surface supports it", async () => {
 		const withCollect: WorkflowTemplateSummary[] = [
 			{
 				id: "wt_idv_collect",
 				name: "IDV plus info collection",
 				isActive: true,
 				isDefault: true,
-				// collect_user_info is now demo-supported (mode b) -> KEPT.
+				// collect_user_info is now demo-supported -> KEPT.
 				checkTypes: ["id_verification", "collect_user_info"],
 			},
 		];

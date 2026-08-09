@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * What this teaches / copy this pattern:
- * The check-in collect step (CT-377 mode b) driven through its injectable `createCollector`.
+ * The check-in collect step driven through its injectable `createCollector`.
  * The SDK data-plane is NOT hit: the collector's `submit` and `describe` are spies. This
  * proves the component's own wiring - describe() -> field config -> prefill -> edit ->
  * submit -> typed-result handling -> advance - without a network or the real SDK. The

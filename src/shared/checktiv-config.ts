@@ -163,12 +163,11 @@ export function isValidWorkflowTemplateId(id: string): boolean {
  * and is NOT filtered.
  *
  * `collect_user_info` is now demonstrated INSIDE the guest check-in journey
- * (`CheckInPage` -> `CheckInCollectForm`, CT-377 mode b): before the SDK identity
- * journey mounts, the demo renders a prefilled "confirm your details" form and submits
- * the applicant info programmatically via `@checktiv/sdk-web/collect-user-info`. So the
- * demo DOES support the check type paired with `id_verification` and it is no longer
- * filtered here. NOTE: the SDK's iframe-RENDERED collect form (mode a) is not shipped;
- * this demo satisfies `collect_user_info` with the developer-owned form (mode b), which
+ * (`CheckInPage` -> `CheckInCollectForm`): before the SDK identity journey mounts,
+ * the demo renders a prefilled "confirm your details" form and submits the applicant
+ * info programmatically via `@checktiv/sdk-web/collect-user-info`. So the demo DOES
+ * support the check type paired with `id_verification` and it is no longer filtered
+ * here. This demo satisfies `collect_user_info` with a developer-owned form, whose
  * `submit()` resolves against the session (or reports `not_collect_step` when the
  * session has no such step, so a template without it is unaffected).
  *
