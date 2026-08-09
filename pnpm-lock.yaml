@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@checktiv/sdk-web':
-        specifier: ^1.6.0
-        version: 1.6.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^1.6.1
+        version: 1.6.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-dialog':
         specifier: ^1.1.23
         version: 1.1.23(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -210,8 +210,8 @@ packages:
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
 
-  '@checktiv/sdk-web@1.6.0':
-    resolution: {integrity: sha512-t8mtn8ULsfNF1Yug0wWYQmArtS0KFjz4oiuUc2gaXyuxSxtg59MeT/v5Du+1VCYELkgYm0UDhOq2X/FgCnBMmg==}
+  '@checktiv/sdk-web@1.6.1':
+    resolution: {integrity: sha512-QZ7tfyXOghspdI4gjKdGMQkEtKUDPo5LOe7RKq/Gste0n4VyePpZOdvjbDMJtImK3cj2mPJPrtDMdv4xFaxfXg==}
     peerDependencies:
       react: ^19.2.7
       react-dom: ^19.2.7
@@ -2778,7 +2778,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@checktiv/sdk-web@1.6.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@checktiv/sdk-web@1.6.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       qrcode-generator: 2.0.4
     optionalDependencies:
