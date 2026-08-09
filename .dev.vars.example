@@ -29,3 +29,11 @@ AUTH_COOKIE_SECRET=replace-with-openssl-rand-hex-32
 # so the embedded reviewer can record a decision. Omit (the default) for the
 # READ-only capability subset. Only ever effective with a TEST key.
 # DEMO_ALLOW_DECIDE=true
+
+# DEV-TEST-ONLY cell targeting (CT-377). Set to "us" to point the SERVER mint proxy
+# at the dev-us public-api instead of the key-derived prod host, so the guest
+# check-in collect step can validate the unpublished `collect_user_info` submit path
+# against dev-us. Pairs with the CLIENT flag `VITE_CHECKTIV_DEV_CELL=us` in `.env`
+# (which points the SDK data-plane at the dev-us sdk-api). Leave UNSET for prod
+# behavior (byte-unchanged). Never set on the finalized public demo.
+# CHECKTIV_DEV_CELL=us

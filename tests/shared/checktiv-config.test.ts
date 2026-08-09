@@ -74,7 +74,7 @@ describe("assertPublishableKeyMatchesContext (defensive cross-check)", () => {
 	});
 });
 
-describe("isTemplateDemoSupported (blocks only collect_user_info)", () => {
+describe("isTemplateDemoSupported (blocks only custom_form)", () => {
 	it("true for identity verification alone", () => {
 		expect(isTemplateDemoSupported(["id_verification"])).toBe(true);
 	});
@@ -85,10 +85,13 @@ describe("isTemplateDemoSupported (blocks only collect_user_info)", () => {
 	it("true for server-side checks only (no applicant-rendered blocker)", () => {
 		expect(isTemplateDemoSupported(["watchlist"])).toBe(true);
 	});
-	it("false when the template includes an unsupported applicant step", () => {
-		expect(isTemplateDemoSupported(["id_verification", "collect_user_info"])).toBe(false);
-		expect(isTemplateDemoSupported(["collect_user_info"])).toBe(false);
-		// custom_form is also applicant-rendered + not imported by the demo.
+	it("true for collect_user_info now that the collect surface (mode b) supports it", () => {
+		// CT-377: `collect_user_info` is demonstrated by the /collect surface, so it is
+		// no longer a demo-unsupported step.
+		expect(isTemplateDemoSupported(["collect_user_info"])).toBe(true);
+		expect(isTemplateDemoSupported(["id_verification", "collect_user_info"])).toBe(true);
+	});
+	it("false when the template includes custom_form (still not rendered by the demo)", () => {
 		expect(isTemplateDemoSupported(["id_verification", "custom_form"])).toBe(false);
 		expect(isTemplateDemoSupported(["custom_form"])).toBe(false);
 	});

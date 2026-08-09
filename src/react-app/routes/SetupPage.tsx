@@ -10,8 +10,8 @@
  * the visitor enters a valid secret key AND a matching publishable key, the form
  * auto-fetches the org's workflow templates (secret-key authed, through the
  * same-origin proxy) and lists ONLY the ones this demo can actually run - it filters
- * out templates that include a demo-unsupported applicant step (`collect_user_info`
- * or `custom_form`, which the demo does not render; server-side checks like watchlist
+ * out templates that include a demo-unsupported applicant step (`custom_form`,
+ * which the demo does not render; server-side checks like watchlist
  * / background pair fine with identity verification and are kept). See
  * `isTemplateDemoSupported`. The label is the name, the value is the `wt_` id. Every
  * async state is self-troubleshootable: loading, empty (create one in the console,
@@ -435,7 +435,7 @@ function TemplateField({
 			: state.kind === "empty"
 				? "No workflow templates were found for this org. Create one in the Checktiv console, then reload, or enter a template id below."
 				: state.kind === "no-compatible"
-					? "All of your workflow templates include an applicant step this demo does not render (collect_user_info or custom_form). Use or create a workflow template without those steps, then reload, or enter a template id below."
+					? "All of your workflow templates include an applicant step this demo does not render (custom_form). Use or create a workflow template without that step, then reload, or enter a template id below."
 					: manualEntry
 						? "Enter the workflow template id, or reload to pick from the list."
 						: keysValid

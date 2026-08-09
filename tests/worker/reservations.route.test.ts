@@ -124,6 +124,48 @@ describe("reservationsRoute - D1-backed CRUD", () => {
 		expect(await patchRes.json()).toMatchObject({ code: "invalid_request" });
 	});
 
+	it("GET /api/checkin/:id returns ONLY the guest-safe prefill for an existing reservation", async () => {
+		const app = reservationsRoute();
+		const createRes = await app.request(
+			"/api/reservations",
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					guestName: "Grace Hopper",
+					guestEmail: "grace@x.co",
+					property: "Unit 7",
+					checkIn: "2026-08-01",
+					checkOut: "2026-08-04",
+					sessionId: "vs_secret",
+					status: "invited",
+				}),
+			},
+			{ DB: env.DB },
+		);
+		const created = (await createRes.json()) as { id: string };
+
+		const res = await app.request(`/api/checkin/${created.id}`, {}, { DB: env.DB });
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as Record<string, unknown>;
+		// Exactly the two guest-safe fields - no sessionId, property, status, or id leak.
+		expect(body).toEqual({ guestName: "Grace Hopper", guestEmail: "grace@x.co" });
+	});
+
+	it("GET /api/checkin/:id on an unknown id returns a structured 404", async () => {
+		const app = reservationsRoute();
+		const res = await app.request("/api/checkin/does-not-exist", {}, { DB: env.DB });
+		expect(res.status).toBe(404);
+		expect(await res.json()).toMatchObject({ code: "not_found" });
+	});
+
+	it("GET /api/checkin/:id returns a structured 501 in the deployed no-D1 shape", async () => {
+		const app = reservationsRoute();
+		const res = await app.request("/api/checkin/anything", {}, {});
+		expect(res.status).toBe(501);
+		expect(await res.json()).toMatchObject({ code: "no_persistence" });
+	});
+
 	it("PATCH with an empty body is a structured 400, never an unstructured 500", async () => {
 		const app = reservationsRoute();
 		const createRes = await app.request(

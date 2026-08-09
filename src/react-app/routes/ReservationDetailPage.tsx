@@ -37,6 +37,7 @@ import {
 	ChecktivClientError,
 } from "../lib/checktiv-client";
 import { getConfig } from "../lib/config-store";
+import { devCellWorkspaceBaseUrl } from "../lib/dev-cell";
 import { mountReviewer } from "../lib/sdk";
 import { selectStore } from "../lib/reservation-store";
 import type { Reservation } from "../../shared/reservation-types";
@@ -277,8 +278,11 @@ function ReservationDetail() {
 			sessionId,
 			region: config.ctx.region,
 			// Thread the custom-domain override so a custom-domain org's reviewer
-			// loads from its own host, not the region default.
-			workspaceBaseUrl: config.ctx.workspaceBaseUrl,
+			// loads from its own host, not the region default. The dev-cell
+			// override (see `../lib/dev-cell`) takes precedence when set, so the
+			// reviewer iframe mounts against the dev-cell workspace instead of the
+			// prod origin (same DEV-TEST-ONLY flag as the sdk-api/api overrides).
+			workspaceBaseUrl: devCellWorkspaceBaseUrl() ?? config.ctx.workspaceBaseUrl,
 			getToken: async ({ sessionId: sid }) => {
 				try {
 					const { framingToken, dataToken, expiresAt } =

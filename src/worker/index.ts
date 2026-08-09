@@ -25,7 +25,13 @@
  *     unauthenticated caller. Every real consumer is an authenticated staff page
  *     (GuardedRoute + cookie) by the time it calls, so gating reads has no
  *     functional downside. This is what stops the relay being an open,
- *     unauthenticated key-forwarding proxy.
+ *     unauthenticated key-forwarding proxy. The ONE deliberate exception is the
+ *     guest-safe collect prefill (`GET /api/checkin/:id`), which is mounted OUTSIDE
+ *     the `/api/reservations` prefix so `requireStaff` does not cover it: the guest
+ *     is unauthenticated and holding the check-in link is the capability. It returns
+ *     ONLY `{ guestName, guestEmail }` for a UUID-keyed reservation (no key/session id)
+ *     and is a documented demo-grade capability (see `reservations.ts` +
+ *     `AGENTS.md`); a production build would authenticate the guest and scope it.
  *
  * Unmatched `/api/*` returns a structured JSON 404 - NEVER the SPA
  * `index.html`. Serving the SPA shell for an unknown `/api` path would shadow
@@ -70,6 +76,17 @@ declare global {
 			 * generated `worker-configuration.d.ts`, not here.
 			 */
 			DEMO_ALLOW_DECIDE?: string;
+			/**
+			 * DEV-TEST-ONLY cell-targeting flag (e.g. `"us"`). Declared HERE (not via
+			 * `wrangler types`) because it is intentionally UNSET in every environment's
+			 * `vars` so the prod relay is byte-unchanged; a deployer sets it via
+			 * `.dev.vars` (local) or a TEMPORARY `env.production.vars` entry only while
+			 * validating the CT-377 `collect_user_info` submit path against dev-us. When
+			 * set, the proxy targets the dev cell public-api (see `shared/dev-cell.ts`).
+			 * Env-unset before finalizing the public demo. Documented in
+			 * `.dev.vars.example`.
+			 */
+			CHECKTIV_DEV_CELL?: string;
 		}
 	}
 }

@@ -21,9 +21,22 @@
  * stash captured synchronously in a lazy `useState`), so it no longer races the write.
  */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import CheckInPage from "../../src/react-app/routes/CheckInPage";
+
+// The collect gate that now precedes the journey uses the SDK's programmatic collector;
+// mock it so importing the page does not load the real SDK data-plane and a confirm
+// advances to the journey deterministically.
+vi.mock("@checktiv/sdk-web/collect-user-info", () => ({
+	collectUserInfo: () => ({
+		submit: async () => ({ ok: true }),
+		// The form probes describe() on mount; return the no-collect-config result so it
+		// renders its full static field set.
+		describe: async () => ({ ok: false, code: "not_collect_step" }),
+	}),
+}));
 
 // Records what `fetchToken()` resolved/threw when called from the child effect.
 const { resultRef } = vi.hoisted(() => ({
@@ -55,15 +68,19 @@ vi.mock("@checktiv/sdk-web/react", async () => {
 beforeEach(() => {
 	sessionStorage.clear();
 	resultRef.current = null;
+	// The collect gate fetches a guest-safe prefill; stub it to fail so the form readies
+	// with empty fields (the resilient fallback) and the test can drive it.
+	vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no network in test")));
 });
 
 afterEach(() => {
 	cleanup();
 	sessionStorage.clear();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 });
 
-it("resolves fetchToken on a FRESH open when the SDK calls it from its mount effect (before the stash-write effect)", async () => {
+it("resolves fetchToken on a FRESH open when the SDK calls it from its mount effect (after the collect gate, before the stash-write effect)", async () => {
 	render(
 		<MemoryRouter initialEntries={["/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc"]}>
 			<Routes>
@@ -71,6 +88,18 @@ it("resolves fetchToken on a FRESH open when the SDK calls it from its mount eff
 			</Routes>
 		</MemoryRouter>,
 	);
+
+	// The journey (hence the SDK's `fetchToken` mount call) only mounts AFTER the collect
+	// gate, so confirm the prefilled details first.
+	fireEvent.change(await screen.findByLabelText("Legal name"), { target: { value: "Ada" } });
+	// Blur the legal name to reveal the structured name fields (progressive disclosure).
+	fireEvent.blur(screen.getByLabelText("Legal name"));
+	fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Ada" } });
+	fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Lovelace" } });
+	fireEvent.change(screen.getByLabelText("Address line 1"), { target: { value: "1 Way" } });
+	fireEvent.change(screen.getByLabelText("City"), { target: { value: "London" } });
+	fireEvent.change(screen.getByLabelText("Country (ISO code)"), { target: { value: "GB" } });
+	fireEvent.click(screen.getByRole("button", { name: /confirm and continue/i }));
 
 	await waitFor(() => expect(resultRef.current).not.toBeNull());
 

@@ -35,6 +35,6 @@ export default defineConfig({
 	server: {
 		port: 3000,
 		// Replace with your own public tunnel/host (see the note above).
-		allowedHosts: ["your-tunnel.example.com"],
+		allowedHosts: ["dev-tunnel.autohost-dev.uk"],
 	},
 });
