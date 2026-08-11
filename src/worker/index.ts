@@ -32,6 +32,16 @@
  *     ONLY `{ guestName, guestEmail }` for a UUID-keyed reservation (no key/session id)
  *     and is a documented demo-grade capability (see `reservations.ts` +
  *     `AGENTS.md`); a production build would authenticate the guest and scope it.
+ *   - `app.onError` catches any UNCAUGHT exception - every route above returns its
+ *     OWN structured error and never throws, so this is the backstop for a bug or a
+ *     failure no route mapped - and maps it to the SAME `{ error, code, status }`
+ *     envelope those routes use (see `checktiv-proxy.ts`'s `mapErrorBody`), never
+ *     Hono's bare `text/plain` "Internal Server Error" default. It never echoes the
+ *     raw error message or stack (same no-raw-echo discipline as the proxy's
+ *     upstream error mapping). The one case worth naming specifically is D1's "no
+ *     such table" SQLITE_ERROR: it is exactly what a fresh clone hits on its first
+ *     `POST /api/reservations` before running `pnpm db:migrate:local` (README Quick
+ *     Start), so it gets a hint pointing at that command instead of a generic retry.
  *
  * Unmatched `/api/*` returns a structured JSON 404 - NEVER the SPA
  * `index.html`. Serving the SPA shell for an unknown `/api` path would shadow
@@ -179,5 +189,49 @@ app.route("/", reservationsRoute());
 app.all("/api/*", (c) =>
 	c.json({ error: "That API route was not found.", code: "not_found", status: 404 }, 404),
 );
+
+/**
+ * True when an error - or any error in its `.cause` chain - is D1's "no such
+ * table" SQLITE_ERROR. Chained because drizzle-orm/d1 wraps the raw D1 driver
+ * error in its own `DrizzleQueryError`, so the SQLite message lives one or two
+ * `.cause` levels down, not on the top-level error (verified against a live,
+ * unmigrated local D1: the thrown `DrizzleQueryError.cause.message` is
+ * `"D1_ERROR: no such table: reservations: SQLITE_ERROR"`). Both substrings
+ * are required so this stays specific to a missing-table failure rather than
+ * matching any SQLite error.
+ */
+function describesMissingTable(err: unknown): boolean {
+	let current: unknown = err;
+	for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+		if (/no such table/i.test(current.message) && /SQLITE_ERROR/i.test(current.message)) {
+			return true;
+		}
+		current = current.cause;
+	}
+	return false;
+}
+
+/**
+ * Global error handler - see the "app.onError" bullet in the module doc above
+ * for why this exists and what it guarantees (structured envelope, no raw
+ * echo, an actionable hint for the fresh-clone "missing migrations" case).
+ */
+app.onError((err, c) => {
+	if (describesMissingTable(err)) {
+		return c.json(
+			{
+				error:
+					'The local database schema has not been applied. Run "pnpm db:migrate:local", then retry.',
+				code: "d1_migrations_required",
+				status: 500,
+			},
+			500,
+		);
+	}
+	return c.json(
+		{ error: "Something went wrong. Please retry.", code: "internal_error", status: 500 },
+		500,
+	);
+});
 
 export default app;

@@ -39,12 +39,22 @@ The app has four pages, all worth reading as integration examples:
 
 ## Files to copy into your own app
 
-If you are integrating Checktiv into your own product, these three files are the pieces
-worth copying:
+If you are integrating Checktiv into your own product, these are the pieces worth
+copying. `CheckInPage.tsx` bundles two integrations - the collect-user-info step and the
+`<ChecktivJourney>` identity journey - so for a single clean reference on just the
+journey mount, read
+[The verification journey, in one component](#the-verification-journey-in-one-component)
+below instead of the full page.
 
 - **Server-side session mint:** [`src/worker/checktiv-proxy.ts`](src/worker/checktiv-proxy.ts) - holds your secret key server-side and forwards to the Checktiv REST API.
 - **Guest journey:** [`src/react-app/routes/CheckInPage.tsx`](src/react-app/routes/CheckInPage.tsx) - the `<ChecktivJourney>` mount and the URL-fragment token model.
+- **Guest details form (optional):** [`src/react-app/components/CheckInCollectForm.tsx`](src/react-app/components/CheckInCollectForm.tsx) - the `@checktiv/sdk-web/collect-user-info` integration that runs before the journey mounts. Skip this one if your workflow template has no `collect_user_info` step.
 - **Staff reviewer:** [`src/react-app/routes/ReservationDetailPage.tsx`](src/react-app/routes/ReservationDetailPage.tsx) + [`src/react-app/lib/sdk.ts`](src/react-app/lib/sdk.ts) - the embedded reviewer and its workspace-token wiring.
+- **Shared modules:** [`src/shared/checktiv-config.ts`](src/shared/checktiv-config.ts) (key parsing and region/mode resolution), [`src/shared/session-status.ts`](src/shared/session-status.ts) (reducing a live Checktiv session status to your own domain status), and [`src/shared/name.ts`](src/shared/name.ts) (legal-name splitting for the details form).
+
+[`src/shared/dev-cell.ts`](src/shared/dev-cell.ts) is a dev-only test hook for pointing
+this demo at a non-production Checktiv cell. It is not part of the integration - do not
+copy it.
 
 ## The verification journey, in one component
 
@@ -94,10 +104,19 @@ prop if you want to override the brand color, but this demo does not use it.
   id (`wt_…`). Test keys run a synthetic flow; live keys run real verifications.
 - **Node.js 20+** and **[pnpm](https://pnpm.io)**.
 
+Once you have keys, expect about 10 minutes to go from a fresh clone to a completed
+guest check-in in the UI. This walkthrough assumes a **live-mode** key (a real,
+billable verification); seeing the guest capture step render locally also needs the
+frontend origin registered (a tunnel, see
+[Running the full guest journey locally](#running-the-full-guest-journey-locally)) - or
+skip that setup and try the [hosted demo](https://sdk-demo.checktiv.com), whose origin
+is already registered.
+
 ## Quick start
 
 ```bash
 pnpm install
+pnpm db:migrate:local            # applies the local D1 schema - the reservations table
 cp .dev.vars.example .dev.vars   # then set AUTH_COOKIE_SECRET (e.g. openssl rand -hex 32)
 pnpm dev                         # http://localhost:3000
 ```

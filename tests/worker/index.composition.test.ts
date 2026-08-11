@@ -19,6 +19,10 @@
  *     (`GET /api/checktiv/workflow-templates`), which the PRE-LOGIN Setup screen
  *     fetches: it bypasses the staff gate but still requires a valid secret key
  *     (no key -> 401 missing_key, not a 403), so the exemption is scoped and safe.
+ *   - `app.onError` (the composition root's global handler) maps an UNCAUGHT
+ *     exception to the same structured envelope every route returns, rather than
+ *     Hono's bare `text/plain` 500 - `reservations.route.test.ts` cannot see this,
+ *     since it exercises `reservationsRoute()` standalone, never through `app`.
  *
  * Env overrides are passed as `app.request`'s third arg (Hono types it
  * `E["Bindings"] | {}`, so a partial/empty object is the intended way to model a
@@ -148,5 +152,40 @@ describe("worker composition - reservation writes are staff-gated too (gate is m
 		);
 		expect(res.status).toBe(403);
 		expect((await res.json()) as { code: string }).toMatchObject({ code: "forbidden" });
+	});
+});
+
+describe("worker composition - app.onError maps an uncaught exception to the structured envelope", () => {
+	it("returns an actionable db:migrate:local hint for D1's 'no such table' error, never the framework's bare 500", async () => {
+		// Storage is isolated PER TEST (vitest-pool-workers default), so dropping the
+		// table here does not leak into any other test - each starts from the
+		// migrated snapshot `tests/apply-migrations.ts` applies. `env.DB` is typed
+		// optional (the deployed shape binds none - see that file), but the test
+		// harness always binds it, so a missing binding here is a harness bug.
+		if (!env.DB) throw new Error("env.DB is not bound - check vitest.workers.jsonc");
+		await env.DB.prepare("DROP TABLE reservations").run();
+		const cookie = await staffCookie();
+
+		const res = await app.request(
+			"/api/reservations",
+			{
+				method: "POST",
+				headers: { cookie, "content-type": "application/json" },
+				body: JSON.stringify({
+					guestName: "Ada",
+					guestEmail: "ada@x.co",
+					property: "Unit 1",
+					checkIn: "2026-08-01",
+					checkOut: "2026-08-03",
+				}),
+			},
+			{ DB: env.DB, AUTH_COOKIE_SECRET: TEST_SECRET },
+		);
+
+		expect(res.status).toBe(500);
+		expect(res.headers.get("content-type") ?? "").toMatch(/application\/json/);
+		const body = (await res.json()) as { error: string; code: string; status: number };
+		expect(body).toMatchObject({ code: "d1_migrations_required", status: 500 });
+		expect(body.error).toMatch(/db:migrate:local/);
 	});
 });
