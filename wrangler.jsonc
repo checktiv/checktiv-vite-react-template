@@ -71,14 +71,17 @@
 				// (and use a TEST key) only to demo the decision flow. Documented in
 				// `.dev.vars.example`.
 			},
-			// Custom domain: the deployed demo origin. `custom_domain: true` makes
-			// Cloudflare manage the DNS record + certificate; all paths route here.
-			"routes": [
-				{
-					"pattern": "sdk-demo.checktiv.com",
-					"custom_domain": true
-				}
-			],
+			// Custom domain / routes are managed in the Cloudflare DASHBOARD (the
+			// `sdk-demo.checktiv.com` custom domain was attached there manually), NOT in
+			// this config. Per Wrangler's "source of truth" guidance, to manage routes
+			// via the dashboard only, OMIT any `routes`/`route` key and set
+			// `workers_dev: false`. A `routes` entry with `custom_domain: true` made
+			// wrangler reconcile the route on every deploy
+			// (`PUT /zones/.../workers/routes`), which the dashboard-managed deploy's API
+			// token lacks permission for (10000 auth error). The manually-attached custom
+			// domain persists - wrangler no longer touches it. Do NOT re-add a `routes`
+			// block here.
+			"workers_dev": false,
 			// Re-stated for explicitness (inherited from top level otherwise). The
 			// deployed SPA + `/api/*` worker-first routing depend on this exact block.
 			"assets": {
