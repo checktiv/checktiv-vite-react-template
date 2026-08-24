@@ -46,11 +46,6 @@ const spies = vi.hoisted(() => ({
 }));
 const { getSession, mintWorkspaceToken, mountReviewer, getReservation, updateReservation } = spies;
 
-// Staff auth is always satisfied here; GuardedRoute must render the page.
-vi.mock("../../src/react-app/lib/auth-client", () => ({
-	useSession: () => ({ status: "authenticated" }),
-}));
-
 vi.mock("../../src/react-app/lib/checktiv-client", async (importActual) => {
 	const actual = await importActual<typeof import("../../src/react-app/lib/checktiv-client")>();
 	return {
@@ -142,10 +137,11 @@ beforeEach(() => {
 	vi.useFakeTimers();
 	// This suite asserts the CUSTOM-DOMAIN `workspaceBaseUrl` (from `config-store`)
 	// threads through untouched, so it must be hermetic against the ambient
-	// `VITE_CHECKTIV_DEV_CELL` dev-cell override flag (see `../../src/react-app/lib/dev-cell`)
-	// regardless of what a developer's local `.env` sets for manual dev-cell testing -
+	// `VITE_CHECKTIV_DEV_CELL*` dev-cell override vars (see `../../src/react-app/lib/dev-cell`)
+	// regardless of what a developer's local `.env.local` sets for manual dev-cell testing -
 	// same deterministic-env-control rationale as `reservation-store.contract.test.ts`.
 	vi.stubEnv("VITE_CHECKTIV_DEV_CELL", undefined);
+	vi.stubEnv("VITE_CHECKTIV_DEV_CELL_WORKSPACE_BASE_URL", undefined);
 	getSession.mockReset();
 	mintWorkspaceToken.mockReset();
 	mountReviewer.mockReset();
@@ -330,15 +326,18 @@ describe("ReservationDetailPage - reviewer embed", () => {
 	});
 
 	it("threads the dev-cell workspace override AHEAD OF the custom-domain workspaceBaseUrl when the dev-cell flag is set", async () => {
+		// The override origin comes from build-time env, not from a constant in the
+		// source tree, so this fixture supplies it. It is an `example.com` placeholder
+		// on purpose: this repo is public and no test may pin a real internal hostname.
+		const devWorkspace = "https://workspace.dev.example.com";
 		vi.stubEnv("VITE_CHECKTIV_DEV_CELL", "us");
+		vi.stubEnv("VITE_CHECKTIV_DEV_CELL_WORKSPACE_BASE_URL", devWorkspace);
 		getSession.mockResolvedValue({ id: "vs_abc123", status: "awaiting_review", checks: [] });
 		renderDetail();
 		await flush();
 		expect(mountReviewer).toHaveBeenCalledTimes(1);
 		const [, input] = mountReviewer.mock.calls[0];
-		expect(input).toMatchObject({
-			workspaceBaseUrl: "https://workspace-dev.us.example.test",
-		});
+		expect(input).toMatchObject({ workspaceBaseUrl: devWorkspace });
 	});
 
 	it("getToken resolves reviewer tokens via mintWorkspaceToken", async () => {

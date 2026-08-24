@@ -91,14 +91,13 @@ it("resolves fetchToken on a FRESH open when the SDK calls it from its mount eff
 
 	// The journey (hence the SDK's `fetchToken` mount call) only mounts AFTER the collect
 	// gate, so confirm the prefilled details first.
-	fireEvent.change(await screen.findByLabelText("Legal name"), { target: { value: "Ada" } });
-	// Blur the legal name to reveal the structured name fields (progressive disclosure).
-	fireEvent.blur(screen.getByLabelText("Legal name"));
+	// The name boxes render immediately and are never config gated, so there is no blur
+	// or probe to wait on before filling them. Only the surname is required.
+	fireEvent.change(await screen.findByLabelText("Surname(s)"), { target: { value: "Lovelace" } });
 	fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Ada" } });
-	fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Lovelace" } });
 	fireEvent.change(screen.getByLabelText("Address line 1"), { target: { value: "1 Way" } });
 	fireEvent.change(screen.getByLabelText("City"), { target: { value: "London" } });
-	fireEvent.change(screen.getByLabelText("Country (ISO code)"), { target: { value: "GB" } });
+	fireEvent.change(screen.getByLabelText("Country"), { target: { value: "GB" } });
 	fireEvent.click(screen.getByRole("button", { name: /confirm and continue/i }));
 
 	await waitFor(() => expect(resultRef.current).not.toBeNull());

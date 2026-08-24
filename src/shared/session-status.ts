@@ -47,11 +47,16 @@ type KnownSessionStatus =
  * Reservation status the UI shows for a guest who has NOT (yet) completed a
  * verification but whose session is terminal-with-no-result (expired / cancelled)
  * or not-yet-started (created / pending). Only a genuinely `completed` session
- * reduces to `"complete"` - mapping a dead session to the green success chip
- * would falsely tell a property manager the guest was verified. Expired and
- * cancelled sessions therefore reduce to `"invited"` (the reservation still
- * lacks a completed verification; the detail page's terminal notice explains the
+ * reduces to `"complete"` - mapping a dead session there would tell a property
+ * manager a verification finished when none ever ran. Expired and cancelled
+ * sessions therefore reduce to `"invited"` (the reservation still lacks a
+ * finished verification; the detail page's terminal notice explains the
  * expiry/cancellation and the re-invite next step).
+ *
+ * `"complete"` means the verification FINISHED, never that the guest PASSED. The
+ * pass/fail/needs-review decision is a separate outcome the browser never sees
+ * here - see {@link TERMINAL_NOTICES} for why, and do not add verdict language
+ * to any surface fed by this reduction.
  */
 const SESSION_TO_RESERVATION_STATUS = {
 	created: "invited",
@@ -89,9 +94,22 @@ export function reduceSessionStatus(sessionStatus: string): ReservationStatus {
  * "what is terminal": both {@link TERMINAL_SESSION_STATUSES} (which stops the
  * poll) and {@link terminalNoticeFor} (which renders the banner) read from it,
  * so the poll-stopping set and the explanatory copy cannot drift apart.
+ *
+ * COMPLETION IS NOT A VERDICT, and the `completed` copy below is written to say
+ * only what a polled status can prove. `completed` means the verification
+ * lifecycle ended; the pass/fail/needs-review DECISION is a separate `outcome`
+ * field that a `completed` session carries and that this demo never receives:
+ * the proxy's status route projects `{ id, status, checks }` and drops
+ * `outcome` (`src/worker/checktiv-proxy.ts`), because the outcome anchor is the
+ * signed `kyc.session.*` webhook delivered to YOUR server, not a polled read
+ * from the browser. So a declined session and an approved session are the same
+ * `completed` status here, and the notice must not claim either one. The next
+ * step it points at (the review panel below it on the detail page) is the
+ * surface that does show the decision.
  */
 const TERMINAL_NOTICES: Record<"completed" | "expired" | "cancelled", string> = {
-	completed: "Verification complete. The guest passed identity verification.",
+	completed:
+		"Verification finished. The pass, fail, or needs-review decision is not shown here: open the review below to see this guest's result, and have your server record the signed webhook as the outcome of record.",
 	expired:
 		"This verification session expired before the guest finished. Create a new check-in link to re-verify.",
 	cancelled: "This verification was canceled. Create a new check-in link to re-verify the guest.",

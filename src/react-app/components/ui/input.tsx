@@ -2,7 +2,7 @@
  * What this teaches / copy this pattern:
  * Hand-authored shadcn/ui "new-york" `Input` primitive - a plain `<input>`
  * with the shared focus/invalid/disabled treatment so every text field in
- * the app (BookingForm, Setup, Login) looks and behaves consistently.
+ * the app (BookingForm, Setup) looks and behaves consistently.
  */
 import type * as React from "react";
 import { cn } from "../../lib/utils";

@@ -23,13 +23,13 @@
  *      actionable banners (origin/scope/session-gone), mapped off the proxy's
  *      client-facing `ChecktivClientError` code+status.
  *
- * Guarding + shell are applied INSIDE this default export (see the routing note
- * in `main.tsx`), never at the router level.
+ * The shell is applied INSIDE this default export (see the routing note in
+ * `main.tsx`), never at the router level. There is no guard: this demo has no
+ * sign-in, so the page is reachable by any visitor.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { AppShell } from "../components/AppShell";
-import { GuardedRoute } from "../components/GuardedRoute";
 import { StatusChip } from "../components/StatusChip";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import {
@@ -128,8 +128,8 @@ function Banner({ tone, children }: { tone: "info" | "warn" | "success"; childre
 }
 
 /**
- * The guarded, shelled page content. All hooks live here so they only mount once
- * `<GuardedRoute>` has admitted an authenticated staff user.
+ * The shelled page content. All hooks live here rather than in the default export
+ * so the shell stays a plain layout wrapper with no data dependencies.
  */
 function ReservationDetail() {
 	const { id } = useParams();
@@ -406,13 +406,11 @@ function ReservationDetail() {
 	);
 }
 
-/** Route entry: guard + shell wrap the detail content per the main.tsx contract. */
+/** Route entry: the shell wraps the detail content per the main.tsx contract. */
 export default function ReservationDetailPage() {
 	return (
-		<GuardedRoute>
-			<AppShell>
-				<ReservationDetail />
-			</AppShell>
-		</GuardedRoute>
+		<AppShell>
+			<ReservationDetail />
+		</AppShell>
 	);
 }

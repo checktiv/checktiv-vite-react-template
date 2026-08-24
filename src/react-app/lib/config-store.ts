@@ -33,7 +33,7 @@ export function setConfig(config: DemoConfig): void {
 	sessionStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 }
 
-/** Remove any stored config (e.g. on "reset key" / sign-out). */
+/** Remove any stored config (e.g. on "reset key" / "reset demo"). */
 export function clearConfig(): void {
 	sessionStorage.removeItem(STORAGE_KEY);
 }

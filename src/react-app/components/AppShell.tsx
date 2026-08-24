@@ -1,17 +1,18 @@
 /**
  * What this teaches / copy this pattern:
- * The staff shell every guarded route wraps itself in. Wrapping happens INSIDE
+ * The staff shell every staff route wraps itself in. Wrapping happens INSIDE
  * each route's own default export (e.g.
- * `export default function ReservationsPage() { return <GuardedRoute><AppShell>
- * ...</AppShell></GuardedRoute> }`), never at the router level in `main.tsx`.
+ * `export default function ReservationDetailPage() { return <AppShell>
+ * ...</AppShell> }`), never at the router level in `main.tsx`.
  *
  * AppShell stays a plain, prop-driven layout component - it does not import
- * `lib/auth-client.ts` or `lib/reservation-store.ts` itself (dependency
- * injection over singleton imports), so it builds and tests in isolation:
- *   - The "Demo login, not production auth" notice is a fixed, ALWAYS-shown
- *     banner. Every staff page renders this shell, so this is the one place
- *     that guarantees the notice is never missed (see `LoginPage.tsx` for
- *     the matching notice on the unshelled sign-in page).
+ * `lib/reservation-store.ts` itself (dependency injection over singleton
+ * imports), so it builds and tests in isolation:
+ *   - The "sample app, no sign-in" notice is a fixed, ALWAYS-shown banner.
+ *     Every staff page renders this shell, so this is the one place that
+ *     guarantees the notice is never missed. It names the two things a visitor
+ *     must know before typing anything real: these pages have no sign-in, and
+ *     the data goes somewhere unprotected.
  *   - `onResetDemo`, when passed, renders the "Reset demo" self-serve action
  *     that wipes ALL demo state on this browser (the entered Checktiv keys +
  *     bookings + guest check-in links) and returns the visitor to Setup - a
@@ -42,8 +43,8 @@ export function AppShell({
 		<div className="flex min-h-svh flex-col bg-background text-foreground">
 			{/* Global demo notice: a full-width strip across the top of the window. */}
 			<div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-				<strong className="font-medium">Demo login, not production auth.</strong> This is a
-				shared, public demo credential with no real session security.
+				<strong className="font-medium">Sample app, not production.</strong> These pages have
+				no sign-in and anyone with the link can open them. Use fake guest details only.
 			</div>
 			{/* Body: the sidebar and content column. `flex-1` + `min-h-0` lets it fill
 			    the space between the notice and the footer, so the sidebar stretches to

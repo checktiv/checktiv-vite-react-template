@@ -1,7 +1,7 @@
 /**
  * What this teaches / copy this pattern:
  * ONE reusable footer rendered on EVERY page - both the staff-shelled pages
- * (via `AppShell`) and the unshelled Setup / Login / guest Check-in pages. It
+ * (via `AppShell`) and the unshelled Setup / guest Check-in pages. It
  * makes it unmistakable that this minimalist PMS is a Checktiv INTEGRATION DEMO
  * and links out to the product, the docs, and the template's source on GitHub.
  *

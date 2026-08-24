@@ -5,17 +5,13 @@
 # is the committed, secret-free documentation of what the Worker reads.
 #
 # For the DEPLOYED Worker these are set differently:
-#   - AUTH_COOKIE_SECRET -> `wrangler secret put AUTH_COOKIE_SECRET`
-#     (a deploy-time HUMAN action; NEVER commit the value, NEVER a `VITE_` var).
+#   - PUBLIC_ORIGIN / DEMO_ALLOW_DECIDE -> `env.production.vars` in wrangler.jsonc.
 #     The deployed env is selected at build via CLOUDFLARE_ENV, so `--env` is not
 #     used here.
-#   - PUBLIC_ORIGIN / DEMO_ALLOW_DECIDE -> `env.production.vars` in wrangler.jsonc.
-
-# HMAC secret that signs the mock staff-session cookie (src/worker/auth.ts).
-# The auth gate FAILS CLOSED (structured 500) if this is unset, so local dev needs
-# it. Generate a random value, e.g. `openssl rand -hex 32`. This is a CLEARLY-FAKE
-# placeholder - replace it; never ship this literal.
-AUTH_COOKIE_SECRET=replace-with-openssl-rand-hex-32
+#
+# This demo has NO authentication, so there is no session secret to provision:
+# every `/api` route answers any caller (see the "NO AUTHENTICATION" note in
+# `src/worker/index.ts`). Nothing in this file is required to start the dev server.
 
 # Authoritative `workspace_token` `origin` body field. Set this to your registered
 # workspace origin (the named-tunnel hostname in local dev, e.g.
@@ -25,15 +21,29 @@ AUTH_COOKIE_SECRET=replace-with-openssl-rand-hex-32
 # in `env.production.vars` (https://sdk-demo.checktiv.com).
 # PUBLIC_ORIGIN=https://your-tunnel.example.com
 
-# Set to "true" to grant the TEST-MODE-ONLY `session:decide` reviewer capability
-# so the embedded reviewer can record a decision. Omit (the default) for the
-# READ-only capability subset. Only ever effective with a TEST key.
+# Set to "true" to grant the `session:decide` reviewer capability so the embedded
+# reviewer can record a decision. Omit (the default) for the READ-only capability
+# subset. A decision writes real audit + decision rows into the org the key belongs
+# to, so enable this only against an org you own.
 # DEMO_ALLOW_DECIDE=true
 
-# DEV-TEST-ONLY cell targeting. Set to "us" to point the SERVER mint proxy
-# at a non-production public-api instead of the key-derived prod host, so the guest
-# check-in collect step can validate the `collect_user_info` submit path against a
-# non-production cell. Pairs with the CLIENT flag `VITE_CHECKTIV_DEV_CELL=us` in
-# `.env` (which points the SDK data-plane at the non-production sdk-api). Leave UNSET
-# for prod behavior (byte-unchanged). Never set on the finalized public demo.
+# DEV-TEST-ONLY cell targeting for the SERVER mint proxy, so the guest check-in
+# collect step can validate the `collect_user_info` submit path against a
+# non-production cell instead of the key-derived prod host.
+#
+# BOTH lines are required together. The flag alone THROWS (naming the missing
+# variable) rather than silently relaying to production. Leave both unset for prod
+# behavior, which is byte-unchanged.
+#
+# `CHECKTIV_DEV_CELL_API_BASE` must be a bare https origin: no userinfo, no IP
+# literal, no localhost, no path or query (see `src/shared/dev-cell.ts`). This file
+# is the ONLY place it belongs - `.dev.vars` is gitignored, so a real internal
+# hostname written here can never be published. Never put one in `wrangler.jsonc`:
+# `scripts/assert-no-dev-cell-in-deploy.mjs` fails the deploy if you do.
+#
+# Pairs with the CLIENT variables in the gitignored `.env.local`:
+#   VITE_CHECKTIV_DEV_CELL=us
+#   VITE_CHECKTIV_DEV_CELL_SDK_API_BASE=https://sdk-api.dev.example.com
+#   VITE_CHECKTIV_DEV_CELL_WORKSPACE_BASE_URL=https://workspace.dev.example.com
 # CHECKTIV_DEV_CELL=us
+# CHECKTIV_DEV_CELL_API_BASE=https://api.dev.example.com

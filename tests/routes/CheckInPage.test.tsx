@@ -18,6 +18,20 @@
  * `onComplete` callback and a `checktiv.idv.submitted` event), and the fraud CONSENT
  * gate (the page owns the disclosure UI and resolves `onConsent`).
  *
+ * The cross-device cases also pin the handoff's REPLACE behavior: while the SDK's QR
+ * overlay owns the screen the page flags its journey wrapper
+ * (`data-checkin-handoff="open"`, the hook `CheckInPage.css` hides the capture surface
+ * with), and EVERY exit - backed out, or a handoff that never produced a code - clears it
+ * again without unmounting the journey. Those two halves have to be tested together:
+ * hiding the capture is only safe because a close event restores it, so a suite that
+ * covered the open path alone would green-light a dead end.
+ *
+ * Scope note, and the reason `CheckInPage.handoff-css.test.tsx` exists next to this file:
+ * `<ChecktivJourney>` is doubled out here, so the real capture DOM never exists and the
+ * `data-checkin-handoff` assertions below can only pin the page's STATE FLAG. Whether the
+ * one CSS rule actually hides the right node is proved in that sibling suite, which
+ * resolves the real cascade over the SDK's shipped stylesheet. Neither half stands alone.
+ *
  * The double captures the props `<ChecktivJourney>` received into a hoisted ref, so
  * the test can (a) assert the exact wiring passed and (b) invoke the callbacks
  * (`onEvent` / `onConsent` / `onComplete`) the SAME way the real SDK would. It is a
@@ -136,6 +150,20 @@ function renderAt(entry: string) {
 	);
 }
 
+/**
+ * True while the page has flagged the journey wrapper as "the cross-device handoff owns
+ * the screen" (`data-checkin-handoff="open"`), which is the hook `CheckInPage.css` keys
+ * the `display: none` on the SDK's `.idv-capture-root` off.
+ *
+ * The `<ChecktivJourney>` double renders nothing, so the real capture surface never
+ * exists in these tests. Asserting the HOOK is deliberate: it is the exact contract
+ * between the page's state machine and the one CSS rule, so these tests pin what the page
+ * actually owns. That the rule hides the right node is a browser check, not a jsdom one.
+ */
+function handoffOwnsScreen(): boolean {
+	return document.querySelector('[data-checkin-handoff="open"]') !== null;
+}
+
 /** The props `<ChecktivJourney>` was last rendered with (throws if it never rendered). */
 function currentJourney(): JourneyProps {
 	const props = journeyRef.current;
@@ -151,15 +179,13 @@ function currentJourney(): JourneyProps {
 async function passCollectGate(): Promise<void> {
 	// The form renders once the (stubbed, failing) prefill read settles.
 	await screen.findByRole("button", { name: /confirm and continue/i });
-	fireEvent.change(screen.getByLabelText("Legal name"), { target: { value: "Ada Lovelace" } });
-	// Blur the legal name to reveal the structured first/middle/last breakdown
-	// (progressive disclosure) before filling those fields.
-	fireEvent.blur(screen.getByLabelText("Legal name"));
+	// The name boxes render immediately and are never config gated, so there is no blur
+	// or probe to wait on before filling them. Only the surname is required.
+	fireEvent.change(await screen.findByLabelText("Surname(s)"), { target: { value: "Lovelace" } });
 	fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Ada" } });
-	fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Lovelace" } });
 	fireEvent.change(screen.getByLabelText("Address line 1"), { target: { value: "1 Analytical Way" } });
 	fireEvent.change(screen.getByLabelText("City"), { target: { value: "London" } });
-	fireEvent.change(screen.getByLabelText("Country (ISO code)"), { target: { value: "GB" } });
+	fireEvent.change(screen.getByLabelText("Country"), { target: { value: "GB" } });
 	fireEvent.click(screen.getByRole("button", { name: /confirm and continue/i }));
 	await waitFor(() => expect(journeyRef.current).not.toBeNull());
 }
@@ -238,14 +264,14 @@ describe("CheckInPage (guest check-in SPA)", () => {
 		// token + publishable key parsed from the hash and threaded into the journey props
 		const props = currentJourney();
 		expect(props.publishableKey).toBe("ah_pk_us_test_abc");
-		// immersive layout is the point of the 1.3.0 bump (full-screen phone capture)
+		// immersive layout gives the phone a full-screen capture surface
 		expect(props.layout).toBe("immersive");
 		// the cross-device overlay strings are injected (mandatory `unavailableMessage`)
 		expect(props.crossDeviceCopy?.unavailableMessage).toBeTruthy();
 
-		// the `checktiv.idv.submitted` event transitions to the terminal "complete" state
+		// `checktiv.idv.submitted` ends the applicant's part of the journey
 		act(() => currentJourney().onEvent({ type: "checktiv.idv.submitted", sessionId: "vs_1" }));
-		expect(screen.getByText(/check-in complete/i)).toBeInTheDocument();
+		expect(screen.getByText(/your id has been submitted/i)).toBeInTheDocument();
 	});
 
 	it("(a2) fetchToken resolves the BARE client-token STRING (not `{ clientToken }`)", async () => {
@@ -253,10 +279,33 @@ describe("CheckInPage (guest check-in SPA)", () => {
 		await expect(currentJourney().fetchToken()).resolves.toBe("tok123");
 	});
 
-	it("(a3) the onComplete callback also transitions to the terminal complete state", async () => {
+	it("(a3) the onComplete callback also transitions to the same terminal submitted state", async () => {
 		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
 		act(() => currentJourney().onComplete({ sessionId: "vs_1" }));
-		expect(screen.getByText(/check-in complete/i)).toBeInTheDocument();
+		expect(screen.getByText(/your id has been submitted/i)).toBeInTheDocument();
+	});
+
+	it("(a6) the terminal card states what is known and never claims the applicant PASSED", async () => {
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		// `checktiv.idv.submitted` is terminal-for-CAPTURE only: it says the images are in,
+		// never that they cleared. The decision is made server-side afterwards and reaches
+		// the integrator's backend on a signed webhook - which this demo has no server to
+		// receive - so any copy implying an outcome here would say "you passed" to an
+		// applicant who was declined. The SDK ships this as a machine-readable rule for
+		// integrators (`dist/agents/manifest.json`, `completion-is-not-a-verdict`).
+		act(() => currentJourney().onEvent({ type: "checktiv.idv.submitted", sessionId: "vs_1" }));
+
+		const card = screen.getByText(/your id has been submitted/i).closest("div");
+		expect(card).not.toBeNull();
+		const copy = card?.textContent ?? "";
+		expect(copy).not.toMatch(/\bpassed\b/i);
+		expect(copy).not.toMatch(/\bverified\b/i);
+		expect(copy).not.toMatch(/\bapproved\b/i);
+		expect(copy).not.toMatch(/\bcleared\b/i);
+		expect(copy).not.toMatch(/\bcomplete\b/i);
+		// And it still gives the applicant a next step rather than a bare end state.
+		expect(copy).toMatch(/close this window/i);
 	});
 
 	it("(a4) a server-side-only next step (processing/no_renderable_step) is a terminal 'submitted' state, not an error, and never reloads", async () => {
@@ -401,6 +450,10 @@ describe("CheckInPage (guest check-in SPA)", () => {
 	it("(d4) surfaces a non-terminal 'still waiting' hint on cross_device_capped (overlay stays open)", async () => {
 		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
 
+		// Real ordering: the overlay opens, and only later does its completion poll cap.
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }),
+		);
 		// The completion poll capped without the phone finishing. Per the SDK contract this
 		// is NOT an error and NOT a verdict: the overlay stays mounted, so the page shows a
 		// "still waiting" hint and does NOT unmount the journey (no terminal surface).
@@ -412,6 +465,79 @@ describe("CheckInPage (guest check-in SPA)", () => {
 		expect(screen.queryByText(/we could not start your check-in/i)).not.toBeInTheDocument();
 		// The journey is still mounted (not torn down) so the phone can still finish.
 		expect(journeyRef.current).not.toBeNull();
+		// The overlay stays on screen at the cap, so the capture surface stays replaced:
+		// the hint sits with the QR the applicant is still meant to scan, not beside a
+		// camera frame telling them to do something else.
+		expect(handoffOwnsScreen()).toBe(true);
+	});
+
+	it("(d5) logs a recoverable SDK error it does not route to a screen, instead of swallowing it", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		// `sdk_load_failed` is the likeliest integration-time failure (a missing
+		// `@checktiv/sdk-web/idv` or `/fraud` side-effect import). It is `recoverable: true`
+		// in the SDK's error table, so it is NOT terminal here - and unlike the capture
+		// errors it has NO SDK UI behind it, so the applicant sits on a blank journey.
+		// Matching no arm and vanishing is the failure mode this final arm exists to stop.
+		act(() =>
+			currentJourney().onEvent({
+				type: "checktiv.idv.error",
+				error: {
+					code: "sdk_load_failed",
+					message: "This session requires the 'idv' module. Import '@checktiv/sdk-web/idv' in your app.",
+					recoverable: true,
+					recovery: "cross_device",
+				},
+			}),
+		);
+
+		expect(warn).toHaveBeenCalledTimes(1);
+		const logged = String(warn.mock.calls[0]?.[0]);
+		expect(logged).toContain("sdk_load_failed");
+		expect(logged).toContain("checktiv.idv.error");
+		// Still not terminal: the journey stays mounted and no failure screen is shown.
+		expect(journeyRef.current).not.toBeNull();
+		expect(screen.queryByText(/we could not start your check-in/i)).not.toBeInTheDocument();
+	});
+
+	it("(d6) does NOT log the routed arms (no console noise on the normal paths)", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		// Everything the page routes to a screen, plus a non-error informational arm, must
+		// stay quiet - otherwise the warning above becomes noise nobody reads.
+		act(() => currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }));
+		act(() => currentJourney().onEvent({ type: "checktiv.idv.cross_device_closed" }));
+		act(() => currentJourney().onEvent({ type: "checktiv.idv.phase", phase: "document_front" }));
+
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it("(d4b) 'Keep checking' re-arms the poll through the SDK handle and never reloads", async () => {
+		// The page must NOT reload to recover a capped poll: the zero-lifecycle mount plane
+		// on a null cursor would 404 into `session_expired`, turning a recoverable wait into
+		// a false dead end. Assert the recovery goes through `openCrossDevice()` instead,
+		// and that the QR stays on screen (the applicant can still finish on their phone).
+		const reloadSpy = vi.spyOn(window.location, "reload").mockImplementation(() => {});
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		act(() => currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }));
+		act(() => currentJourney().onEvent({ type: "checktiv.idv.cross_device_capped" }));
+		expect(screen.getByText(/still waiting for your phone/i)).toBeInTheDocument();
+		// The desktop trigger is hidden while the overlay owns the screen, so any
+		// `openCrossDevice` call after this point can only have come from "Keep checking".
+		expect(openCrossDeviceSpy).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("button", { name: /keep checking/i }));
+
+		expect(openCrossDeviceSpy).toHaveBeenCalledTimes(1);
+		expect(reloadSpy).not.toHaveBeenCalled();
+		// The hint clears (a fresh poll is running) but the handoff still owns the screen:
+		// the SDK keeps the same overlay mounted, so restoring the capture here would put a
+		// camera frame back under the code the applicant is still meant to scan.
+		expect(screen.queryByText(/still waiting for your phone/i)).not.toBeInTheDocument();
+		expect(handoffOwnsScreen()).toBe(true);
 	});
 
 	it("(f) renders the desktop cross-device trigger and calls the SDK handle's openCrossDevice()", async () => {
@@ -424,34 +550,145 @@ describe("CheckInPage (guest check-in SPA)", () => {
 		expect(openCrossDeviceSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it("(f3) hides the cross-device trigger once the SDK opens its QR overlay", async () => {
+	it("(f3) replaces the capture surface (and hides the trigger) once the SDK opens its QR overlay", async () => {
 		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
 
-		// Visible before any overlay event on a fine-pointer desktop (the default stub).
+		// Visible before any overlay event on a fine-pointer desktop (the default stub), and
+		// the capture surface is NOT hidden yet.
 		expect(
 			screen.getByRole("button", { name: /continue on your phone/i }),
 		).toBeInTheDocument();
+		expect(handoffOwnsScreen()).toBe(false);
 
-		// The SDK mounts its own QR overlay: the host's quiet trigger must step aside so the
-		// two never compete for attention. The SDK emits no close event, so it stays hidden.
+		// The SDK mounts its own QR overlay INSIDE the journey. The host's quiet trigger
+		// steps aside AND the camera capture surface is hidden, so the applicant is not
+		// asked to use a camera and scan a code with their phone at the same time.
 		act(() =>
 			currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }),
 		);
 		expect(
 			screen.queryByRole("button", { name: /continue on your phone/i }),
 		).not.toBeInTheDocument();
+		expect(handoffOwnsScreen()).toBe(true);
+		// Hiding, NOT unmounting: the journey owns the QR overlay and the completion poll,
+		// so tearing it down here would destroy the handoff the applicant is mid-way through.
+		expect(journeyRef.current).not.toBeNull();
 	});
 
-	it("(f4) re-shows the trigger when the handoff mint fails (cross_device_unavailable, no overlay)", async () => {
+	it("(f5) restores the capture surface and the trigger when the applicant backs out (cross_device_closed)", async () => {
 		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
 
-		// The mint failed and NO overlay was shown, so the trigger stays available to retry.
 		act(() =>
-			currentJourney().onEvent({ type: "checktiv.idv.cross_device_unavailable" }),
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }),
 		);
+		expect(handoffOwnsScreen()).toBe(true);
+
+		// The SDK DOES emit a close event when the applicant uses the overlay's own back /
+		// try-again control (it wires its own `onClose` on this `<ChecktivJourney>` path).
+		// Without honoring it the capture surface would stay hidden for the rest of the
+		// journey, leaving the applicant with no capture and no way back - the dead end that
+		// makes hiding the capture dangerous in the first place.
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_closed" }),
+		);
+		expect(handoffOwnsScreen()).toBe(false);
 		expect(
 			screen.getByRole("button", { name: /continue on your phone/i }),
 		).toBeInTheDocument();
+		// The journey was never torn down, so the restored capture surface is the SAME live
+		// one - no remount, no fresh session.
+		expect(journeyRef.current).not.toBeNull();
+	});
+
+	it("(f6) drops a stale 'still waiting' hint when a capped overlay is closed", async () => {
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }),
+		);
+		// The completion poll capped while the overlay was still up: the hint tells the
+		// applicant to use "the code on screen".
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_capped" }),
+		);
+		expect(screen.getByText(/still waiting for your phone/i)).toBeInTheDocument();
+		expect(handoffOwnsScreen()).toBe(true);
+
+		// They then back out. There is no code on screen any more, so the hint (and its
+		// "Keep checking" control, which would reopen a panel they just dismissed) must go
+		// with it, leaving a plain working capture surface.
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_closed" }),
+		);
+		expect(screen.queryByText(/still waiting for your phone/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /keep checking/i })).not.toBeInTheDocument();
+		expect(handoffOwnsScreen()).toBe(false);
+		expect(
+			screen.getByRole("button", { name: /continue on your phone/i }),
+		).toBeInTheDocument();
+	});
+
+	it("(f4) restores the capture surface but RETIRES the trigger when the handoff is unavailable (cold start)", async () => {
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		// The mint failed at open time, so the SDK mounts its "unavailable" arm instead of a
+		// QR. That arm renders the `unavailableMessage` paragraph and NOTHING else - no Back,
+		// no Try again - so the capture surface must come back: it is the only thing the
+		// applicant can still act on, and hiding it behind an undismissable panel would be a
+		// hard dead end.
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_unavailable" }),
+		);
+		expect(handoffOwnsScreen()).toBe(false);
+
+		// The trigger must NOT come back. The SDK keeps one overlay object per journey and
+		// `openCrossDevice()` short-circuits on it; nothing clears it because the unavailable
+		// arm has no control to dismiss it. So the trigger would be a dead button, which is
+		// the dead-end this page's cross-device recovery exists to prevent.
+		expect(
+			screen.queryByRole("button", { name: /continue on your phone/i }),
+		).not.toBeInTheDocument();
+		// Not terminal: the journey stays mounted so the applicant can finish on the camera.
+		expect(journeyRef.current).not.toBeNull();
+	});
+
+	it("(f4b) an unavailable RE-MINT inside an open overlay restores the capture and retires the trigger", async () => {
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		// The sharper arm: the applicant is inside an OPEN QR overlay and uses the SDK's
+		// "Get a new code", which fails. The SDK swaps the SAME panel to its unavailable arm
+		// and re-emits `cross_device_unavailable` - it never emits `cross_device_closed`,
+		// because the unavailable arm renders no control that could fire one.
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_opened" }),
+		);
+		expect(handoffOwnsScreen()).toBe(true);
+
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_unavailable" }),
+		);
+		expect(handoffOwnsScreen()).toBe(false);
+		expect(
+			screen.queryByRole("button", { name: /continue on your phone/i }),
+		).not.toBeInTheDocument();
+	});
+
+	it("(f4c) a poll that caps AFTER an unavailable handoff never claims there is a code on screen", async () => {
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		// The SDK starts its completion poll BEFORE it mints, so the poll keeps running
+		// behind a failed handoff and will eventually cap. The "still waiting" hint tells the
+		// applicant to keep using "the code on screen" - and on this path no code was ever
+		// rendered, so raising it would send them to look for something that does not exist.
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_unavailable" }),
+		);
+		act(() =>
+			currentJourney().onEvent({ type: "checktiv.idv.cross_device_capped" }),
+		);
+
+		expect(screen.queryByText(/still waiting for your phone/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /keep checking/i })).not.toBeInTheDocument();
 	});
 
 	it("(f2) hides the cross-device trigger on a coarse-pointer (touch) device", async () => {
@@ -500,18 +737,55 @@ describe("CheckInPage (guest check-in SPA)", () => {
 			consent = Promise.resolve(currentJourney().onConsent());
 		});
 
-		// The disclosure is now a centered modal dialog (not an inline column card): it is a
-		// real ARIA dialog, modal, and labelled by its heading.
-		const dialog = screen.getByRole("dialog");
-		expect(dialog).toHaveAttribute("aria-modal", "true");
+		// The disclosure is a real ARIA dialog labelled by its heading. Modality is asserted
+		// through its EFFECT rather than an `aria-modal` attribute: the primitive aria-hides
+		// the rest of the document instead, which is the better-supported equivalent, so an
+		// attribute assertion would pin an implementation detail and pass on a hand-rolled
+		// overlay that traps nothing.
+		const dialog = await screen.findByRole("dialog");
 		expect(dialog).toHaveAccessibleName(/before you continue/i);
+		expect(document.body.querySelector("[aria-hidden='true']")).not.toBeNull();
+
+		// Focus lands on the primary action, so a keyboard or screen-reader user starts on
+		// the choice rather than at the top of the document.
+		const allow = within(dialog).getByRole("button", { name: /^allow$/i });
+		await waitFor(() => expect(allow).toHaveFocus());
 
 		// Allow (scoped inside the dialog) resolves the promise and dismisses the modal.
 		await act(async () => {
-			fireEvent.click(within(dialog).getByRole("button", { name: /^allow$/i }));
+			fireEvent.click(allow);
 		});
 		await expect(consent).resolves.toBe(true);
-		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+	});
+
+	it("(e4) the consent gate cannot be escaped: the applicant MUST choose", async () => {
+		await renderActive("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+
+		let consent: Promise<boolean> | undefined;
+		act(() => {
+			consent = Promise.resolve(currentJourney().onConsent());
+		});
+		const dialog = await screen.findByRole("dialog");
+
+		// The forced choice is the point of this gate, and this asserts the GUARANTEE
+		// (Escape does not take the disclosure away) rather than any one mechanism that
+		// currently provides it. Two do: `open` is controlled with no `onOpenChange`, and
+		// the content suppresses the primitive's own dismissals. Wiring `onOpenChange`
+		// without keeping the suppression is the realistic future edit that breaks this,
+		// and it would leave `onConsent` parked forever with the journey stuck.
+		// There is also no close affordance of any kind besides the two choices.
+		await act(async () => {
+			fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" });
+		});
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+		expect(within(dialog).getAllByRole("button")).toHaveLength(2);
+
+		// Still resolvable the intended way.
+		await act(async () => {
+			fireEvent.click(within(dialog).getByRole("button", { name: /not now/i }));
+		});
+		await expect(consent).resolves.toBe(false);
 	});
 
 	it("(e2) declining consent resolves onConsent false without ending the journey", async () => {
@@ -528,5 +802,64 @@ describe("CheckInPage (guest check-in SPA)", () => {
 		// Deny -> fraud stays off, but the identity journey is NOT terminated.
 		await expect(consent).resolves.toBe(false);
 		expect(screen.queryByText(/we could not start your check-in/i)).not.toBeInTheDocument();
+	});
+
+	it("(h) carries the edge's country guess from GET /api/geo into the collect form's dropdown", async () => {
+		// The WIRING test. The page's geo read and the form's dropdown are each covered on
+		// their own (`tests/worker/geo.route.test.ts`, the collect-form suite), and two
+		// green halves would still let the prop between them go unpassed. This drives the
+		// real page with a real `/api/geo` response and asserts the value lands SELECTED.
+		//
+		// It also pins that the two reads are INDEPENDENT: the prefill call still fails
+		// here (the deployed demo binds no D1, so its 501 is the production case), and the
+		// country must survive that. Folding the country into the prefill response would
+		// have failed exactly this test.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((input: RequestInfo | URL) => {
+				const url = typeof input === "string" ? input : String(input);
+				if (url.includes("/api/geo")) {
+					return Promise.resolve(
+						new Response(JSON.stringify({ country: "DE" }), {
+							headers: { "content-type": "application/json" },
+						}),
+					);
+				}
+				return Promise.reject(new Error("no network in test"));
+			}),
+		);
+
+		renderAt("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+		await screen.findByRole("button", { name: /confirm and continue/i });
+
+		const country = screen.getByLabelText("Country");
+		expect(country).toHaveValue("DE");
+		expect(screen.getByText(/we picked this from your connection/i)).toBeInTheDocument();
+	});
+
+	it("(h2) leaves the country unselected when /api/geo reports no usable signal", async () => {
+		// The local-dev and no-Cloudflare-edge case reaching the page end to end: a 200
+		// with `{ country: null }` must read the same as no signal at all, and must NOT
+		// fall back to a plausible default the guest would submit without noticing.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((input: RequestInfo | URL) => {
+				const url = typeof input === "string" ? input : String(input);
+				if (url.includes("/api/geo")) {
+					return Promise.resolve(
+						new Response(JSON.stringify({ country: null }), {
+							headers: { "content-type": "application/json" },
+						}),
+					);
+				}
+				return Promise.reject(new Error("no network in test"));
+			}),
+		);
+
+		renderAt("/checkin/r1#ct=tok123&pk=ah_pk_us_test_abc");
+		await screen.findByRole("button", { name: /confirm and continue/i });
+
+		expect(screen.getByLabelText("Country")).toHaveValue("");
+		expect(screen.queryByText(/we picked this from your connection/i)).not.toBeInTheDocument();
 	});
 });
