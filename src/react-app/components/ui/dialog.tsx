@@ -1,10 +1,23 @@
 /**
  * What this teaches / copy this pattern:
  * Hand-authored shadcn/ui "new-york" `Dialog` primitive family, wrapping
- * Radix's `@radix-ui/react-dialog` (focus trap, `Escape`/overlay-click
- * dismiss, and ARIA wiring come from Radix; this file only adds the shared
- * visual treatment). `BookingForm`'s "New booking" flow mounts inside
- * `DialogContent`.
+ * Radix's `@radix-ui/react-dialog` (focus trap, focus restore on close, body
+ * scroll lock, portaling, `Escape`/overlay-click dismiss, and ARIA wiring all
+ * come from Radix; this file only adds the shared visual treatment).
+ * `BookingForm`'s "New booking" flow and the guest check-in page's fraud
+ * consent gate both mount inside `DialogContent`.
+ *
+ * Use this rather than hand-rolling `role="dialog" aria-modal="true"`. That
+ * attribute pair only redirects a screen reader's virtual cursor; it does
+ * nothing for `Tab`, so a hand-rolled version leaves every control behind the
+ * overlay reachable by keyboard, restores focus nowhere on close, and lets the
+ * page scroll underneath on touch.
+ *
+ * A dialog that must NOT be dismissable (the applicant has to choose) is
+ * expressible here without giving any of that up: pass
+ * `onEscapeKeyDown` / `onPointerDownOutside` / `onInteractOutside` handlers
+ * that `preventDefault()`, plus `showCloseButton={false}`. See
+ * `CheckInPage.tsx`'s consent gate.
  */
 import type * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -49,10 +62,20 @@ function DialogContent({
 	return (
 		<DialogPortal>
 			<DialogOverlay />
+			{/*
+			 * `max-h` + `overflow-y-auto` are NOT cosmetic and must not be dropped: a
+			 * centered fixed box with neither one grows past the viewport and gets
+			 * clipped at BOTH ends, with nothing to scroll. That makes a dialog whose
+			 * content is taller than the viewport - a short phone in landscape, a raised
+			 * OS text size, or the 200% zoom WCAG 1.4.4 requires - literally unreachable,
+			 * including its buttons. It is a hard dead end for any dialog the user must
+			 * answer to continue (the fraud consent gate on the guest check-in page is
+			 * exactly that: it has no Escape and no backdrop dismiss by design).
+			 */}
 			<DialogPrimitive.Content
 				data-slot="dialog-content"
 				className={cn(
-					"fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:max-w-lg",
+					"fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:max-w-lg",
 					className,
 				)}
 				{...props}

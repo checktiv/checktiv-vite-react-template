@@ -2,9 +2,9 @@
  * What this teaches / copy this pattern:
  * Bring-your-own-key bootstrap - the FIRST screen every visitor hits. The key
  * lives in `sessionStorage` ONLY (via `config-store`): never persisted anywhere
- * else, never logged, never put in the URL. It is intentionally unguarded and
- * unshelled (no `<GuardedRoute>`/`<AppShell>` - see the routing note in
- * `main.tsx`), since there is no `DemoConfig` yet for either of those to check.
+ * else, never logged, never put in the URL. It is intentionally unshelled (no
+ * `<AppShell>` - see the routing note in `main.tsx`), since there is no
+ * `DemoConfig` yet for the shell's actions to act on.
  *
  * Workflow-template selection is a DROPDOWN, not a free-text `wt_` field: once
  * the visitor enters a valid secret key AND a matching publishable key, the form

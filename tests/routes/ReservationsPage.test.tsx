@@ -8,9 +8,9 @@
  * dependency is a `tsc -b` failure right here, not a silent runtime drift.
  *
  * We render the named `ReservationsView` (the injectable inner component), NOT
- * the default export, because the default export wraps itself in
- * `<GuardedRoute>` (which probes `/api/auth/session` over `fetch`) - the view is
- * the seam that lets us test the booking logic without a mock auth backend.
+ * the default export, because the default export resolves the real store /
+ * config / client singletons - the view is the seam that lets us inject typed
+ * mocks for all three.
  *
  * Three required paths: (a) happy path - call order +
  * split-vs-joined name mapping + the `#ct=` fragment link shape; (b) mint
@@ -166,11 +166,21 @@ describe("ReservationsView", () => {
 				checkOut: "2026-08-05",
 			}),
 		);
-		// split name + email into the mint, plus the test-mode synthetic outcome
+		// The booking form captured the boundary as two separate inputs, so the mint
+		// sends the STRUCTURED pair: `lastName` -> family_name, `firstName` ->
+		// given_names as a one-element ARRAY. `toEqual` (not objectContaining) on the
+		// applicant so a stray retired key would fail rather than pass unnoticed.
 		expect(client.createSession).toHaveBeenCalledWith(
-			expect.objectContaining({ first_name: "Ada", last_name: "Lovelace", email: "ada@example.co" }),
+			{ family_name: "Lovelace", given_names: ["Ada"], email: "ada@example.co" },
 			expect.objectContaining({ expectedOutcome: "review" }),
 		);
+		// Nothing reconstructs a name: the joined `guestName` is never fed to the mint
+		// on this path, and no retired field is emitted.
+		const bookingApplicant = client.createSession.mock.calls[0][0] as Record<string, unknown>;
+		expect(bookingApplicant).not.toHaveProperty("first_name");
+		expect(bookingApplicant).not.toHaveProperty("last_name");
+		expect(bookingApplicant).not.toHaveProperty("legal_name");
+		expect(bookingApplicant).not.toHaveProperty("reference_name");
 		// persist the session link
 		expect(store.update).toHaveBeenCalledWith(
 			"res_1",
@@ -235,6 +245,36 @@ describe("ReservationsView", () => {
 				expect.objectContaining({ sessionId: "vs_1", status: "invited" }),
 			),
 		);
+	});
+
+	it("(b2) re-invite sends the joined guestName VERBATIM as reference_name, never split", async () => {
+		// The load-bearing CT-404 assertion. A saved reservation carries ONE joined
+		// `guestName` column, so this path does not know where the family name begins.
+		// "Ana Garcia Lopez" is the case that exposes a whitespace split: last-token
+		// splitting yields family_name "Lopez" (wrong - the surname is "Garcia Lopez"),
+		// and first-token splitting yields given_names ["Ana"] with the rest as a
+		// surname it never verified. The string goes verbatim to `reference_name`, a
+		// non-authoritative display label, because that is honestly all it is; the
+		// screenable parts come from the applicant in the collect step. Assert the
+		// applicant EXACTLY: no name-component key and no retired key may appear.
+		const user = userEvent.setup();
+		const store = makeStore();
+		const client = makeClient();
+		const joined: Reservation = { ...RESERVATION, guestName: "Ana Garcia Lopez" };
+		store.list.mockResolvedValue([joined]);
+		store.update.mockResolvedValue({ ...joined, sessionId: "vs_1", status: "invited" });
+		client.createSession.mockResolvedValue(SESSION);
+
+		renderView(store, client, makeConfig());
+		await waitFor(() => expect(store.list).toHaveBeenCalled());
+
+		await user.click(await screen.findByRole("button", { name: /re-?invite/i }));
+		await waitFor(() => expect(client.createSession).toHaveBeenCalledTimes(1));
+
+		expect(client.createSession.mock.calls[0][0]).toEqual({
+			reference_name: "Ana Garcia Lopez",
+			email: joined.guestEmail,
+		});
 	});
 
 	it("(c) store-error: list() rejecting renders an actionable state with a retry, not a crash", async () => {

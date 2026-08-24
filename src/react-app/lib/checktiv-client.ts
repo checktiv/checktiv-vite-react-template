@@ -21,6 +21,7 @@
  */
 import { getConfig as getStoredConfig } from "./config-store";
 import type { DemoConfig } from "../../shared/checktiv-config";
+import type { ValidationIssue } from "../../shared/checktiv-errors";
 
 /** Result of a raw `POST /v1/sessions` mint (the fields the booking flow persists and the detail page polls). */
 export type CreateSessionResult = {
@@ -65,10 +66,48 @@ export type ListWorkflowTemplatesResult = {
 	templates: WorkflowTemplateSummary[];
 };
 
-/** Applicant PII in the snake_case shape the wire `CreateSessionRequest.applicant` expects. */
+/**
+ * Applicant PII in the snake_case shape the wire `CreateSessionRequest.applicant`
+ * expects. The retired `first_name` / `last_name` pair was REMOVED from the API; this
+ * is the ICAO-aligned replacement. `legal_name` and `full_name` were retired with them
+ * and are accepted on NO request shape: a whole undivided name cannot be split back
+ * apart by anyone, so it can never reach a background check, and letting integrators
+ * keep sending one only hid that. All three retired keys now 422 with a migration
+ * message naming their replacement (proven live in the proxy contract test).
+ *
+ * The rule this shape exists to enforce: supply only what you AUTHORITATIVELY know,
+ * and never reconstruct one name form from the other.
+ *
+ *   - You hold the boundary (your form has separate given/family inputs, so the person
+ *     themselves declared it): send `family_name` + `given_names`. `given_names` is an
+ *     ARRAY because a person can hold several. This is the ONLY screenable name shape.
+ *   - You hold one joined string (a PMS `guestName` column, an imported CSV): send it
+ *     VERBATIM as `reference_name`. That is a non-authoritative DISPLAY LABEL, not a
+ *     name the platform will screen or match, which is exactly what an unsplittable
+ *     string honestly is. The applicant supplies the screenable parts themselves in
+ *     the collect step.
+ *
+ * Do NOT split a joined name on whitespace to fill the component fields. "Last token
+ * is the surname" is wrong for `Garcia Lopez`, for `van der Berg`, for every
+ * family-name-first order, and for every mononym. A wrong split is worse than no
+ * split, because it is silently wrong on the document-match step.
+ *
+ * Every name field is OPTIONAL (the API accepts an applicant carrying only an email),
+ * but a field that is PRESENT must be non-blank: `family_name: ""` is a 422. Omit the
+ * key rather than sending an empty string.
+ */
 export interface ApplicantInput {
-	first_name: string;
-	last_name: string;
+	/** The family name / surname, exactly as the person declared it. */
+	family_name?: string;
+	/** Every given name, in document order. Never derived by splitting a joined name. */
+	given_names?: string[];
+	/**
+	 * A caller-supplied, NON-AUTHORITATIVE display label, such as a booking system's
+	 * joined guest name. Write-only: accepted on create but never echoed back. Use it
+	 * when the family/given boundary is unknown; never as a substitute for the
+	 * components when you do know it.
+	 */
+	reference_name?: string;
 	email: string;
 }
 
@@ -92,16 +131,48 @@ interface ClientDeps {
 	getConfig?: () => DemoConfig | null;
 }
 
-/** Thrown when a proxy call fails; `code` mirrors the proxy's actionable error code. */
+/**
+ * Thrown when a proxy call fails; `code` mirrors the proxy's actionable error code.
+ *
+ * `issues` carries the proxy's forwarded field-level validation detail on a 422 (see
+ * `shared/checktiv-errors`). The same detail is already folded into `message` so a
+ * caller that only renders `error.message` shows the actionable guidance for free;
+ * `issues` is here for a caller that wants to highlight the offending field instead.
+ */
 export class ChecktivClientError extends Error {
 	readonly code: string;
 	readonly status: number;
-	constructor(message: string, code: string, status: number) {
+	readonly issues: ValidationIssue[];
+	constructor(message: string, code: string, status: number, issues: ValidationIssue[] = []) {
 		super(message);
 		this.name = "ChecktivClientError";
 		this.code = code;
 		this.status = status;
+		this.issues = issues;
 	}
+}
+
+/**
+ * Pull the proxy's forwarded `details.issues` off an error body, tolerating any shape.
+ * The proxy already sanitized and capped them, so this only has to narrow types - a
+ * malformed body degrades to no issues rather than throwing over an error path.
+ */
+function readIssues(body: Record<string, unknown>): ValidationIssue[] {
+	const details = body.details;
+	if (typeof details !== "object" || details === null) return [];
+	const raw = (details as Record<string, unknown>).issues;
+	if (!Array.isArray(raw)) return [];
+	return raw.flatMap((entry) => {
+		if (typeof entry !== "object" || entry === null) return [];
+		const record = entry as Record<string, unknown>;
+		if (typeof record.message !== "string") return [];
+		const issue: ValidationIssue = { message: record.message };
+		if (Array.isArray(record.keys)) {
+			issue.keys = record.keys.filter((key): key is string => typeof key === "string");
+		}
+		if (typeof record.path === "string") issue.path = record.path;
+		return [issue];
+	});
 }
 
 /**
@@ -136,6 +207,7 @@ export function createChecktivClient(deps: ClientDeps = {}): ChecktivClient {
 				typeof body.error === "string" ? body.error : "The verification request failed.",
 				typeof body.code === "string" ? body.code : "request_failed",
 				res.status,
+				readIssues(body),
 			);
 		}
 		return body as T;

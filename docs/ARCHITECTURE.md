@@ -4,13 +4,20 @@ Design notes for the Checktiv PMS demo: the load-bearing facts an integrator nee
 to understand how the guest journey, the reviewer embed, and the stateless Worker
 proxy fit together.
 
-## Guest check-in: the `<ChecktivJourney>` React provider
+## Guest check-in: the `<ChecktivJourney>` React component
 
 The check-in page renders the applicant journey with `<ChecktivJourney>` from
-`@checktiv/sdk-web/react`, the React wrapper around the SDK's zero-lifecycle mount. Its
-props mirror the SDK's mount options (`publishableKey`, `fetchToken`, `onEvent`,
-`onComplete`, `onConsent`, `layout`, `theme`). The component owns the full SDK lifecycle,
-which removes the imperative-mount plumbing a hand-rolled integration would carry:
+`@checktiv/sdk-web/react`, the React wrapper around the SDK's zero-lifecycle mount. Its prop
+type is the SDK's `MountOptions`, so it accepts more than this demo passes. The integration
+props the check-in page sets are `publishableKey`, `fetchToken`, `onConsent`, `onEvent`,
+`onComplete`, `crossDeviceCopy` and `layout`, plus a `ref` for the journey handle. Any other
+prop on that element belongs to the demo's dev-cell test hook, not to the integration.
+`crossDeviceCopy` is load-bearing for the cross-device handoff described below, and this
+demo passes no `theme` (color mode comes from `data-theme` on `<html>`). For the options it
+does not exercise, and one that does not work in 1.9.0, see [SCOPE.md](SCOPE.md).
+
+The component owns the full SDK lifecycle, which removes the imperative-mount plumbing a
+hand-rolled integration would carry:
 
 - It mounts the capture surface on render and calls `destroy()` on unmount, so there is
   no imperative `mount()` call, no container ref, and no teardown effect. It also
@@ -30,14 +37,34 @@ around it:
   stay client-side and never hit the server as a query string. The page parses the
   fragment, stashes the values in browser storage so a same-device resume survives a
   reload, and passes them into `fetchToken` and `publishableKey`.
-- **The consent disclosure.** `onConsent` calls back into a host-rendered disclosure; the
-  passive fraud module collects only after the applicant agrees, and a declined or
-  missing gate surfaces a loud error rather than silently skipping collection.
-- **The cross-device QR handoff.** The page shows a QR code so a guest can move the
-  journey from a desktop to their phone. The fragment-carried `clientToken` is the only
-  cross-device shared state, so the same token resumes the session on the second device.
+- **The consent disclosure.** `onConsent` calls back into a host-rendered disclosure and
+  the passive fraud module collects only after the applicant agrees. The two failure modes
+  are not symmetric, and neither one throws:
+  - A **declined** gate is a silent no-op inside the SDK. The fraud module simply never
+    starts and **no event is emitted**, so the host owns whatever it wants to record about
+    the choice. The identity journey proceeds; fraud signals are supplemental.
+  - An **absent** `onConsent` on a session whose template declares the fraud module emits a
+    `checktiv.fraud.error` event carrying the `sdk_load_failed` code, and skips the module.
+- **The cross-device handoff trigger, and only the trigger.** The host does **not** render
+  a QR code and must not build one. The host renders a desktop-only affordance that calls
+  `openCrossDevice()` on the journey `ref`; from there the SDK owns everything: it mints a
+  **fresh single-use handoff link** from its own endpoint on the working-token plane, opens
+  its **own** QR and copy-link overlay inside the journey's DOM, runs the completion poll,
+  and emits the four cross-device event arms the host reacts to
+  (`checktiv.idv.cross_device_opened` / `_unavailable` / `_capped` / `_closed`).
+
+  What the host must supply is the `@checktiv/sdk-web/idv/cross-device` import (without it
+  `openCrossDevice()` warn-no-ops) and a `crossDeviceCopy` object for the overlay's strings.
+
+  **Do not encode the `clientToken` into a QR code.** It is a durable, multi-day,
+  resume-capable bearer capability, which is exactly why this demo keeps it in the URL
+  fragment and off the wire. The SDK's single-use handoff link exists so the durable token
+  never has to travel to a second device, and a host-rolled QR of the check-in link throws
+  that property away.
 - **Terminal states.** `onComplete` and the `onEvent` stream drive the page's own done,
-  error, and expired screens, each with an in-product next step.
+  error, and expired screens, each with an in-product next step. Note that a terminal
+  *capture* state is not a verdict: the outcome arrives on your server through a signed
+  webhook, which this demo does not receive. See [SCOPE.md](SCOPE.md).
 
 ## Guest-path vs reviewer-path origin policy
 
@@ -84,8 +111,14 @@ error. The two guards are independent and both must pass.
 
 - Local dev binds a D1 database (`DB`) and sets `PERSISTENCE=d1`. The deployed Worker
   binds no D1 and stores nothing server-side (`PERSISTENCE=local` -> browser
-  `localStorage`). The `client_token` in the guest check-in link is the only
-  cross-device shared state.
+  `localStorage`).
+- Because there is no server-side store, this demo has nowhere for a webhook delivery to
+  land, which is why the staff view polls session status from the browser instead. That is
+  the demo's largest deliberate omission; see [SCOPE.md](SCOPE.md).
+- The demo shares no state across devices of its own. The desktop-to-phone handoff is the
+  SDK's: it mints a fresh single-use link server-side and the phone consumes that link into
+  the same session. The durable `client_token` stays on the device that received the
+  check-in link.
 
 ## Client-bundle boundary (Drizzle must never reach the client bundle)
 

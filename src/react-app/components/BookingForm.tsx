@@ -1,13 +1,17 @@
 /**
  * What this teaches / copy this pattern:
  * <BookingForm> collects the guest's first name, last name, and email as
- * DISTINCT fields - never a single combined "name" field. This is
- * load-bearing: it composes `guestName = `${firstName}
- * ${lastName}`` for the `NewReservation` record (whose type carries a
- * single `guestName`) AND passes the split `{ first_name, last_name, email }`
- * shape straight through to `checktivClient.createSession` (the wire
- * `applicant` shape). Collecting the split fields here means nothing later has
- * to re-split a joined name back apart.
+ * DISTINCT fields - never a single combined "name" field. This is load-bearing, and
+ * it is the demo's own PMS model rather than a Checktiv shape: the reservation record
+ * carries a single joined `guestName`, so the form composes
+ * `guestName = `${firstName} ${lastName}`` for storage.
+ *
+ * Collecting the two fields separately is what makes the STAFF MEMBER the authority on
+ * where the family name begins. `ReservationsPage` maps them at the Checktiv boundary
+ * (`lastName` -> `family_name`, `firstName` -> `given_names`) without inferring
+ * anything. Nothing anywhere re-splits a joined name to recover that boundary, which
+ * is why `firstName`/`lastName` stay the local field names here: renaming them would
+ * imply this form knows the wire shape, and it deliberately does not.
  */
 import { useState, type FormEvent } from "react";
 import { Button } from "./ui/button";

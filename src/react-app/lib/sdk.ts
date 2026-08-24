@@ -52,9 +52,14 @@ export function buildReviewerConfig(input: ReviewerConfigInput) {
 		// Pin the reviewer to LIGHT to match this demo's theme. Unlike the guest
 		// journey (whose managed capture reads the host's `data-theme` because it
 		// renders in-page), the reviewer is a cross-origin iframe and CANNOT read
-		// the host document, so the color mode MUST be passed explicitly here or it
-		// falls back to the reviewer's own default (dark). This demo is fixed-light
-		// (`<html data-theme="light">`); a themed host would forward its live mode.
+		// the host document, so the color mode MUST be passed explicitly here. The
+		// SDK forwards it as a `mode` URL param and omits the param entirely when
+		// `colorMode` is undefined; the reviewer then resolves an absent `mode` to
+		// `auto`, which means FOLLOW THE STAFF OPERATOR'S OS color scheme - not a
+		// fixed default. So omitting this leaves a light host app rendering a dark
+		// reviewer panel for anyone whose OS is in dark mode. This demo is
+		// fixed-light (`<html data-theme="light">`); a themed host would forward its
+		// live mode instead.
 		theme: { colorMode: "light" },
 	} satisfies WorkspaceConfig;
 }

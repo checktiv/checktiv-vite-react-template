@@ -18,12 +18,14 @@
  * resolved host) - see `resolveWorkspaceOrigin`.
  *
  * DEV-TEST-ONLY exception: when the SERVER env var `CHECKTIV_DEV_CELL` is set (never
- * a request/user value), `effectiveApiBase` targets a compile-time-constant dev-cell
- * public-api origin (see `shared/dev-cell.ts`) instead of the key-derived prod host.
- * This is the env-gated hook that lets the demo exercise the `collect_user_info`
- * submit path against a non-production cell. It is OFF by default (unset), so
- * the prod path is byte-unchanged, and the override origin is still a static constant,
- * not attacker-controlled. Env-unset before finalizing the public demo.
+ * a request/user value), `effectiveApiBase` targets the dev-cell public-api origin
+ * named by the SERVER env var `CHECKTIV_DEV_CELL_API_BASE` (see `shared/dev-cell.ts`)
+ * instead of the key-derived prod host. This is the env-gated hook that lets the demo
+ * exercise the `collect_user_info` submit path against a non-production cell. It is
+ * OFF by default (unset), so the prod path is byte-unchanged. Both variables are
+ * deploy-time env, unreachable from any request, and the origin must pass the bare-
+ * https-origin validator in `shared/dev-cell.ts` - so the override adds no SSRF
+ * surface even though it is no longer a source constant.
  *
  * Why raw `POST /v1/sessions` instead of `Checktiv.sessions.create`: the SDK returns
  * only `{ clientToken }` and cannot carry `expected_outcome`, but the demo needs the
@@ -35,6 +37,14 @@
  * which is `{ error: { code, message, details } }`; the 422 origin gate surfaces
  * `code === 'validation_error'` with `details.reason === 'origin_not_permitted'`, so
  * `origin_not_permitted` is NOT a top-level code.
+ *
+ * What a 422 forwards (and what it still drops): the free-form top-level
+ * `error.message` is DROPPED, because it is unstructured and has been observed
+ * echoing key-adjacent request detail. The structured `details.issues[]` IS forwarded,
+ * sanitized and capped, because it names the offending FIELD and carries the
+ * retired-field migration guidance an integrator cannot get anywhere else. Swallowing
+ * it turns every schema rejection into "check your inputs and retry", which is a
+ * dead-end. See `shared/checktiv-errors` for the forwarded shape and the scrub.
  */
 import { Hono, type Context } from "hono";
 import {
@@ -42,7 +52,14 @@ import {
 	InvalidKeyError,
 	type KeyContext,
 } from "../shared/checktiv-config";
-import { resolveDevCellOrigins } from "../shared/dev-cell";
+import { resolveDevCellOrigin } from "../shared/dev-cell";
+import {
+	formatIssue,
+	isCredentialFree,
+	MAX_FORWARDED_ISSUES,
+	MAX_ISSUE_MESSAGE_LENGTH,
+	type ValidationIssue,
+} from "../shared/checktiv-errors";
 
 /** Default upstream timeout; a Checktiv call is aborted past this and maps to 504. */
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -50,8 +67,16 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 /**
  * Least-privilege reviewer capabilities the demo grants by default: READ-only, so
  * the embedded reviewer can view everything without writing a decision/override into
- * the real org's audit + decision rows. `session:decide` is opt-in (test-mode only,
- * behind `DEMO_ALLOW_DECIDE`); `session:override` is never granted here.
+ * the real org's audit + decision rows. `session:decide` is opt-in behind
+ * `DEMO_ALLOW_DECIDE`; `session:override` is never granted here.
+ *
+ * The opt-in is deliberately NOT also gated on `mode === 'test'`. It used to be, and
+ * that made the decision flow undemonstrable: test mode routes every check to
+ * synthetic provider stubs and disables fraud detection outright, so the only
+ * configuration that could grant `session:decide` was the one guaranteed to have no
+ * real evidence or findings to decide about. The deployed demo stays safe because
+ * `DEMO_ALLOW_DECIDE` is left UNSET in `wrangler.jsonc`, not because of the key mode;
+ * a live key additionally passes the app's own "Continue with live key" confirmation.
  */
 const READ_CAPABILITIES = [
 	"session:read",
@@ -60,7 +85,7 @@ const READ_CAPABILITIES = [
 ] as const;
 
 /** The hardcoded public reviewer identity carried by the demo's `wk_*` DATA token. */
-const DEMO_ACTOR = { extId: "demo-manager", name: "Demo Manager" } as const;
+const DEMO_ACTOR = { ext_id: "demo-manager", name: "Demo Manager" } as const;
 
 /**
  * Session-id shape gate before interpolating `:id` into an upstream URL (SSRF
@@ -77,12 +102,18 @@ interface ProxyEnv {
 	DEMO_ALLOW_DECIDE?: string;
 	/**
 	 * DEV-TEST-ONLY cell-targeting flag (e.g. `"us"`). Unset in prod (byte-unchanged).
-	 * When set, every upstream call targets the compile-time-constant dev-cell
-	 * public-api origin (see `shared/dev-cell.ts`) instead of the key-derived prod
-	 * host - used to exercise the `collect_user_info` submit path against a
-	 * non-production cell. Never request/user-derived. Env-unset before finalizing.
+	 * When set, every upstream call targets `CHECKTIV_DEV_CELL_API_BASE` instead of
+	 * the key-derived prod host - used to exercise the `collect_user_info` submit
+	 * path against a non-production cell. Never request/user-derived.
 	 */
 	CHECKTIV_DEV_CELL?: string;
+	/**
+	 * DEV-TEST-ONLY dev-cell public-api origin, REQUIRED whenever
+	 * `CHECKTIV_DEV_CELL` is set (the pair throws if the flag is on and this is
+	 * missing, rather than silently relaying to production). Deploy-time env only,
+	 * set in the gitignored `.dev.vars`; must be a bare https origin.
+	 */
+	CHECKTIV_DEV_CELL_API_BASE?: string;
 }
 
 /** Narrow fetch signature the proxy needs; DI so tests can stub the upstream. */
@@ -99,6 +130,12 @@ interface UpstreamError {
 	status: number;
 	code?: string;
 	reason?: string;
+	/**
+	 * Sanitized field-level validation detail from a 422 (`details.issues[]`). This is
+	 * the ONLY upstream-authored text the proxy forwards, and it is capped + scrubbed
+	 * by `sanitizeIssues` before it gets here.
+	 */
+	issues?: ValidationIssue[];
 }
 
 /** Outcome of an upstream call after the `{ data }` envelope is unwrapped. */
@@ -198,7 +235,7 @@ export function checktivProxy(options: ProxyOptions = {}): Hono<{
 		const origin = resolveWorkspaceOrigin(c.env.PUBLIC_ORIGIN, c.req.header("Origin"));
 
 		const capabilities: string[] = [...READ_CAPABILITIES];
-		if (c.env.DEMO_ALLOW_DECIDE === "true" && ctx.mode === "test") {
+		if (c.env.DEMO_ALLOW_DECIDE === "true") {
 			capabilities.push("session:decide");
 		}
 
@@ -345,19 +382,24 @@ function resolveKey(key: string | undefined): KeyResolution {
 /**
  * Resolve the upstream public-api base for this request. Prod path: the
  * key-derived `ctx.apiBase` (asserted `*.checktiv.com` in `resolveKey`).
- * DEV-TEST-ONLY: when the SERVER env `CHECKTIV_DEV_CELL` selects a dev cell, use
- * that cell's compile-time-constant public-api origin instead (see
- * `shared/dev-cell.ts`). The override host intentionally bypasses the
- * `.checktiv.com` pin because it is a trusted static constant chosen by a server
- * env flag, NEVER by request/user input, so it introduces no SSRF surface. Unset
- * (the default) returns the prod origin unchanged.
+ * DEV-TEST-ONLY: when the SERVER env `CHECKTIV_DEV_CELL` is set, use the origin in
+ * `CHECKTIV_DEV_CELL_API_BASE` instead (see `shared/dev-cell.ts`). The override
+ * host intentionally bypasses the `.checktiv.com` pin, and that is sound because
+ * both variables are SERVER env - never a request header, body, query, or user
+ * field - and the origin is validated to be a bare https origin (no userinfo, no IP
+ * literal, no localhost, no path) before it is used. Unset (the default) returns
+ * the prod origin unchanged.
  */
 function effectiveApiBase(ctx: KeyContext, env: ProxyEnv | undefined): string {
 	// `env` is always present at runtime (Cloudflare provides it), but a Hono
 	// `app.request(path, init)` with no third arg leaves it undefined - guard so the
 	// prod path never throws on a missing env.
-	const devCell = resolveDevCellOrigins(env?.CHECKTIV_DEV_CELL);
-	return devCell ? devCell.apiBase : ctx.apiBase;
+	const devCellApiBase = resolveDevCellOrigin(
+		env?.CHECKTIV_DEV_CELL,
+		env?.CHECKTIV_DEV_CELL_API_BASE,
+		"CHECKTIV_DEV_CELL_API_BASE",
+	);
+	return devCellApiBase ?? ctx.apiBase;
 }
 
 /**
@@ -422,17 +464,61 @@ async function callUpstream(
 }
 
 /**
- * Extract ONLY the safe fields (status/code/details.reason) from an upstream error
- * body. Never returns the raw body - the message field can echo key-adjacent detail.
+ * Extract ONLY the safe fields (status/code/details.reason/details.issues) from an
+ * upstream error body. Never returns the raw body - the TOP-LEVEL `error.message` is
+ * deliberately still dropped, because it is free-form and has been observed echoing
+ * key-adjacent request detail.
+ *
+ * `details.issues[]` IS forwarded (sanitized), and that asymmetry is the point: the
+ * issues are schema-authored, field-scoped, and carry the retired-field migration
+ * guidance an integrator needs, while the top-level message carries nothing the
+ * proxy's own mapping does not already say.
  */
 function extractUpstreamError(status: number, parsed: unknown): UpstreamError {
 	const error = asRecord(asRecord(parsed).error);
 	const code = typeof error.code === "string" ? error.code : undefined;
-	const reason =
-		typeof asRecord(error.details).reason === "string"
-			? (asRecord(error.details).reason as string)
-			: undefined;
-	return { status, code, reason };
+	const details = asRecord(error.details);
+	const reason = typeof details.reason === "string" ? details.reason : undefined;
+	const issues = sanitizeIssues(details.issues);
+	return issues.length > 0 ? { status, code, reason, issues } : { status, code, reason };
+}
+
+/**
+ * Narrow, cap, and scrub upstream `details.issues[]` into forwardable
+ * `ValidationIssue`s. Anything unparseable collapses to `[]` rather than throwing on
+ * an error path. Three bounds keep this from becoming a raw echo:
+ *   - at most `MAX_FORWARDED_ISSUES` issues, each message truncated to
+ *     `MAX_ISSUE_MESSAGE_LENGTH`, at most 10 keys per issue;
+ *   - only `message` / `keys` / `path` survive (never the whole issue object);
+ *   - any issue whose text carries a credential marker is DROPPED outright, so the
+ *     "no key or bearer token ever leaves this proxy" invariant holds even if an
+ *     upstream message were to change shape.
+ */
+function sanitizeIssues(raw: unknown): ValidationIssue[] {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const issues: ValidationIssue[] = [];
+	for (const entry of raw) {
+		if (issues.length >= MAX_FORWARDED_ISSUES) break;
+		const record = asRecord(entry);
+		const message = str(record.message).slice(0, MAX_ISSUE_MESSAGE_LENGTH);
+		if (!message) continue;
+		const keys = Array.isArray(record.keys)
+			? record.keys.filter((key): key is string => typeof key === "string").slice(0, 10)
+			: [];
+		// `path` is an array of segments upstream (`["applicant","family_name"]`); join it
+		// into the dotted form an integrator can search their own payload for.
+		const path = Array.isArray(record.path)
+			? record.path.filter((seg): seg is string => typeof seg === "string").join(".")
+			: "";
+		if (!isCredentialFree([message, path, ...keys].join(" "))) continue;
+		const issue: ValidationIssue = { message };
+		if (keys.length > 0) issue.keys = keys;
+		if (path) issue.path = path;
+		issues.push(issue);
+	}
+	return issues;
 }
 
 /**
@@ -463,8 +549,16 @@ function mapFailure(
 	return c.json(mapErrorBody(outcome.err), mapHttpStatus(outcome.err));
 }
 
+/** The client-facing error body. `details` rides only a 422 that named its fields. */
+interface ClientErrorBody {
+	error: string;
+	code: string;
+	status: number;
+	details?: { issues: ValidationIssue[] };
+}
+
 /** Sanitized, actionable client body per upstream status - no raw echo. */
-function mapErrorBody(err: UpstreamError): { error: string; code: string; status: number } {
+function mapErrorBody(err: UpstreamError): ClientErrorBody {
 	if (err.status === 401 || err.status === 403) {
 		return {
 			error: "Your Checktiv key is not authorized for this action. Check the key's scopes.",
@@ -491,6 +585,23 @@ function mapErrorBody(err: UpstreamError): { error: string; code: string; status
 					"This workspace origin is not permitted for your org. Set your workspace origin in the Checktiv console, then retry.",
 				code: "origin_not_permitted",
 				status: 422,
+			};
+		}
+		// Field-level detail, when upstream named the offending fields. Collapsing this
+		// to the generic sentence below is the difference between an integrator who
+		// fixes their payload in one pass and one who is stuck guessing: a retired-field
+		// migration hint ("first_name was removed, use given_names") lives HERE and
+		// nowhere else. It is folded into `error` so a caller that renders only the
+		// message still shows it, and repeated in `details` for a caller that wants to
+		// highlight the field.
+		if (err.issues && err.issues.length > 0) {
+			return {
+				error: `The verification service rejected the request: ${err.issues
+					.map(formatIssue)
+					.join(" ")}`,
+				code: "validation_error",
+				status: 422,
+				details: { issues: err.issues },
 			};
 		}
 		return {

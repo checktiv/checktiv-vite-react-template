@@ -93,7 +93,7 @@ describe("terminalNoticeFor (banner text for a terminal session)", () => {
 	// terminal status must yield a notice, and every non-terminal one must not.
 	it("returns the completed notice", () => {
 		expect(terminalNoticeFor("completed")).toBe(
-			"Verification complete. The guest passed identity verification.",
+			"Verification finished. The pass, fail, or needs-review decision is not shown here: open the review below to see this guest's result, and have your server record the signed webhook as the outcome of record.",
 		);
 	});
 
@@ -117,6 +117,47 @@ describe("terminalNoticeFor (banner text for a terminal session)", () => {
 	it("gives a notice for exactly the poll-stopping terminal set (no drift)", () => {
 		for (const status of TERMINAL_SESSION_STATUSES) {
 			expect(terminalNoticeFor(status)).not.toBeNull();
+		}
+	});
+
+	// COMPLETION IS NOT A VERDICT, and this is the guard on the staff half of that rule.
+	// `completed` is a lifecycle status: a session that was DECLINED and a session that
+	// was APPROVED both arrive here as `completed`, because the pass/fail/needs-review
+	// decision lives in a separate `outcome` field that this demo's proxy does not
+	// forward and the browser therefore never sees. The decision anchor is the signed
+	// webhook delivered to the integrator's server. So no notice may claim an outcome -
+	// the previous `completed` copy said "The guest passed identity verification" and
+	// told a property manager a declined guest had passed.
+	//
+	// Applied to EVERY notice, not just `completed`, so the rule cannot be reintroduced
+	// on the expired/cancelled arms or on a terminal status added later.
+	const VERDICT_CLAIMS = [
+		/\bpassed\b/i,
+		/\bfailed\b/i,
+		/\bapproved\b/i,
+		/\bdeclined\b/i,
+		/\brejected\b/i,
+		/\bverified\b/i,
+		/\bcleared\b/i,
+	];
+
+	it.each([...TERMINAL_SESSION_STATUSES])(
+		"the %s notice states what is known and never asserts a verdict",
+		(status) => {
+			const notice = terminalNoticeFor(status);
+			expect(notice).not.toBeNull();
+			for (const claim of VERDICT_CLAIMS) {
+				expect(notice).not.toMatch(claim);
+			}
+		},
+	);
+
+	it("points the operator at an in-product next step on every terminal status", () => {
+		// The demo's no-dead-end rule: a terminal banner that only announces an end state
+		// leaves the operator with nowhere to go. Each notice names the action that
+		// follows (open the review, or create a new check-in link).
+		for (const status of TERMINAL_SESSION_STATUSES) {
+			expect(terminalNoticeFor(status)).toMatch(/open the review|new check-in link/i);
 		}
 	});
 });

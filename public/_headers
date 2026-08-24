@@ -2,7 +2,24 @@
 #
 # Vite copies everything in `public/` into `dist/client`, and Cloudflare Workers
 # static assets honor this `_headers` file, so these headers apply to every
-# served asset.
+# served STATIC ASSET.
+#
+# STATIC ASSETS ONLY - NOT `/api/*`. `wrangler.jsonc` sets
+# `run_worker_first: ["/api/*"]`, which sends those requests straight to the
+# Worker and bypasses the static-asset layer that applies this file. So none of
+# the headers below reach a `/api/*` response, and generalizing "every served
+# asset" to "every response" is wrong. `/api/*` gets its own, deliberately
+# smaller set (a JSON response wants different headers than a document) from
+# `secureHeaders()` in `src/worker/index.ts`. If your `/api` ever returns HTML or
+# sets a cookie, that is the file to edit - not this one.
+#
+# WHERE THIS FILE TAKES EFFECT: the deployed Worker, and locally under
+# `pnpm preview` (which runs `vite build` then `vite preview`). It does NOT take
+# effect under `pnpm dev`. `@cloudflare/vite-plugin` feeds `_headers` to the dev
+# server only when `experimental.headersAndRedirectsDevModeSupport` is enabled in
+# `vite.config.ts`, and this demo leaves it off, so the dev server answers every
+# request without these headers. Verify a change here with `pnpm preview`
+# (or against the deployed demo), never with `pnpm dev`.
 #
 # This is a deliberately SAFE baseline. It does NOT set a resource-restricting
 # Content-Security-Policy (`default-src`/`script-src`/`connect-src`/`frame-src`),
@@ -14,14 +31,82 @@
 # against a real session before shipping it. The origins to allow are:
 #   connect-src: https://sdk-api.us.checktiv.com https://sdk-api.eu.checktiv.com
 #                https://workspace.us.checktiv.com https://workspace.eu.checktiv.com
-#   frame-src:   the Checktiv capture embed origin (plus the workspace origins above)
+#   frame-src:   https://embed.us.checktiv.com https://embed.eu.checktiv.com
+#                (the capture origin, the same host the camera grant below names)
+#                plus the workspace origins above
 #
-# Note: `Permissions-Policy` intentionally does NOT restrict `camera` - the SDK
-# capture iframe needs camera access.
+# This demo installs the SDK from npm, so its own origin serves the script and no
+# `script-src` entry for the Checktiv CDN is needed. A script-tag install would
+# also need https://sdk.us.checktiv.com / https://sdk.eu.checktiv.com there.
+#
+# CAMERA: why the `Permissions-Policy` below names the capture origin.
+#
+# The camera opens inside a cross-origin capture frame the SDK renders, and that
+# frame is served from the CAPTURE origin, `embed.<region>.checktiv.com`. The SDK
+# sets `allow="camera"` on the frame, which delegates the feature to the frame's
+# own origin, so the capture origin is the one a `camera` allowlist must name.
+#
+# It is NOT this page's origin, and it is NOT the CDN origin
+# (`sdk.<region>.checktiv.com`) that serves the SDK script on script-tag installs.
+# The CDN origin is the intuitive wrong guess, because it is the host in a
+# `<script>` tag and the host in stack traces; the browser matches a camera grant
+# against the frame's own document origin, never against where its scripts came
+# from. Naming it here leaves the capture frame with no camera grant at all.
+#
+# This entry is NOT required for the SDK to work. A page that declares no
+# `camera` directive at all leaves the feature undeclared, the frame inherits it,
+# and the camera opens; that is why an integration with no `Permissions-Policy`
+# header works unchanged. It becomes required the moment a page DECLARES a
+# `camera` allowlist, because a declared allowlist that omits the capture origin
+# denies the frame the camera and the applicant cannot finish verification.
+# `camera=()` and an allowlist naming some other Checktiv host both fail that
+# way, and the failure looks like a device problem rather than a header problem.
+# This demo declares a restrictive policy on purpose, so the correct pattern is
+# visible here instead of left as an exercise.
+#
+# Both regions are listed because this demo reads its region at runtime from the
+# key the visitor pastes (`ah_sk_us_...` or `ah_sk_eu_...`), so either capture
+# origin can be the live one. A single-region integration lists only its own.
+#
+# `self` stays in the allowlist even though this page never opens the camera
+# itself. A document can only delegate a permission it holds: the frame's
+# `allow="camera"` attribute narrows the parent's grant, it can never grant a
+# permission the parent lacks. Omit `self` and the parent holds no camera
+# permission at all, so there is nothing to delegate, and the frame is denied
+# even though its own origin is listed. If you point the demo at a
+# non-production cell (`VITE_CHECKTIV_DEV_CELL*`, see `src/shared/dev-cell.ts`),
+# that cell serves its capture frame from a different host, so add that host
+# while you test:
+#   camera=(self "https://embed.us.checktiv.com" "https://embed.dev.example.com")
+#
+# WHY `form-action` IS SAFE TO SET HERE WHEN THE RESOURCE DIRECTIVES ARE NOT.
+#
+# The CSP below is deliberately NON-resource: it restricts what can FRAME this
+# page, what `<base>` can rewrite, and where a form can POST - none of which the
+# SDK uses. `form-action 'self'` is what stops an injected form from posting its
+# contents to an attacker's origin, and `base-uri 'self'` alone does not cover
+# that. It costs nothing here because this demo submits over `fetch`, never by
+# HTML form submission. A resource directive (`connect-src`, `frame-src`) is a
+# different matter: get one wrong and the capture iframe silently fails, which is
+# why they stay absent until tested against a real session.
+#
+# Full guide: https://docs.checktiv.com/developers/sdks/security-headers
+#
+# HSTS: THE LINE BELOW MAY BE INERT, AND IS ON THIS DEMO.
+#
+# If your zone has HSTS enabled in the Cloudflare dashboard, the ZONE setting
+# wins and the value here never reaches the wire. Verified on
+# sdk-demo.checktiv.com: this file asks for `max-age=63072000; includeSubDomains`
+# and the response carries `max-age=15552000; includeSubDomains; preload`. Nothing
+# is unsafe (the served policy is the stronger one - it adds `preload`), but it
+# means editing this line alone would change nothing. Set the value you actually
+# want in the dashboard, and check the wire with `curl -sI`, not the file. Every
+# other directive in this block DOES survive to the wire byte for byte; HSTS is
+# the one exception, and only because of the zone override.
 /*
-  Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'
+  Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
   X-Frame-Options: DENY
   Strict-Transport-Security: max-age=63072000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: geolocation=(), payment=(), usb=()
+  Permissions-Policy: camera=(self "https://embed.us.checktiv.com" "https://embed.eu.checktiv.com"), geolocation=(), payment=(), usb=()

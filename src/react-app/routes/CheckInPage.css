@@ -1,0 +1,55 @@
+/**
+ * What this teaches / copy this pattern:
+ * The ONE rule a host needs so the SDK's cross-device handoff REPLACES the camera
+ * capture surface instead of stacking below it. Co-located with the page that owns
+ * the journey (mirroring how the hosted verify app keeps its own capture-area
+ * stylesheet next to its island), so copying `CheckInPage.tsx` brings the behavior.
+ *
+ * Why CSS and not "unmount the journey": the SDK appends its QR overlay INSIDE the
+ * journey's own DOM (`target.appendChild(...)` on the idv module's container), and
+ * that same journey owns the completion poll that advances this page when the phone
+ * finishes. Unmounting `<ChecktivJourney>` to swap surfaces would destroy the QR
+ * panel and the poll at the exact moment the applicant needs both. "Replace" here is
+ * about what the applicant SEES, so the journey stays mounted and only the capture
+ * surface is hidden.
+ *
+ * What hiding does and does NOT do: `display: none` suppresses rendering but never
+ * reparents or reloads the capture iframe. That is what makes backing out cheap (the
+ * SDK's own "Back" control fires `checktiv.idv.cross_device_closed` and a LIVE capture
+ * surface reappears with no remount, so the handoff is never a dead end).
+ *
+ * WHICH SDK STATES THIS APPLIES TO, and why that is not "every overlay state". The page
+ * sets `data-checkin-handoff="open"` only while a real QR is on screen. It deliberately
+ * does NOT set it for the SDK's "unavailable" panel, which renders a single message
+ * paragraph with no Back and no Try again, and therefore can never emit the close event
+ * that brings the capture surface back. Applying this rule there would hide the capture
+ * behind something the applicant cannot dismiss. The rule to carry into your own host:
+ * only hide your surface for a state that can hand the screen back.
+ *
+ * KNOWN LIMITATION, and it is not cosmetic: because the iframe is never reloaded, the
+ * CAMERA STAYS ACQUIRED while the QR panel is on screen. The applicant has just said
+ * they are moving to their phone, and their desktop camera indicator stays lit. Hiding
+ * an element does not stop media capture, and the host cannot stop it either: capture
+ * runs in a cross-origin iframe on the embed origin, so the page cannot reach its
+ * tracks, and the SDK exposes no suspend/release call. The only host-side lever that
+ * would release it is unmounting the journey, which also removes the QR panel and the
+ * completion poll (both live inside the journey's DOM). Releasing the camera therefore
+ * needs an SDK change; this rule is the best available host-side behavior until then,
+ * and removing it would not release the camera either.
+ *
+ * Why `.idv-capture-root`: it is the single wrapper EVERY capture arm (frame,
+ * skeleton, status, error, coaching) renders inside, and it ships in
+ * `@checktiv/sdk-web/capture-ui/style.css` - the stylesheet `CheckInPage.tsx`
+ * already imports by name. Targeting that named class is the stable contract;
+ * targeting the SDK's panel container by DOM position would not be.
+ *
+ * Specificity note (the reason this rule actually applies): the SDK ships
+ * `.idv-capture-root { display: contents }` in the same unlayered stylesheet, so
+ * this selector is deliberately more specific (attribute + class) rather than
+ * relying on import order. Tailwind utilities would NOT work here: they land in
+ * `@layer utilities`, and an unlayered declaration outranks any layered one no
+ * matter how specific it is.
+ */
+[data-checkin-handoff="open"] .idv-capture-root {
+	display: none;
+}

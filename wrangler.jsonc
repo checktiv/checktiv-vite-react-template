@@ -57,6 +57,15 @@
 		// (D1-bound, stateful) config and must NEVER be deployed - it would ship server
 		// persistence, violating the zero-persistence invariant.
 		"production": {
+			// PINNED, and it must stay pinned. Without an explicit name here wrangler
+			// derives `<top-level name>-production`, which deployed this app to
+			// `checktiv-pms-demo-production` - a worker the `sdk-demo.checktiv.com`
+			// custom domain is NOT attached to. Every deploy silently succeeded and
+			// changed nothing on the live site; the orphan accumulated ten versions
+			// before anyone noticed, because `wrangler deploy` exits 0 either way.
+			// The live worker the domain points at is this one. Verify a deploy landed
+			// by checking the served asset hash, not by the deploy's exit code.
+			"name": "checktiv-vite-react-template",
 			"vars": {
 				// Pairs with the client build's `VITE_PERSISTENCE=local` (.env.production);
 				// the two MUST agree or the browser calls `/api/reservations` and hits
@@ -67,8 +76,9 @@
 				// request `Origin` header in production.
 				"PUBLIC_ORIGIN": "https://sdk-demo.checktiv.com"
 				// DEMO_ALLOW_DECIDE is intentionally UNSET here: the deployed demo grants
-				// the READ-only reviewer capability subset by default. Set it to "true"
-				// (and use a TEST key) only to demo the decision flow. Documented in
+				// the READ-only reviewer capability subset by default, and this unset is
+				// the ONLY thing keeping the public instance read-only. Set it to "true"
+				// locally to demo the decision flow against an org you own. Documented in
 				// `.dev.vars.example`.
 			},
 			// Custom domain / routes are managed in the Cloudflare DASHBOARD (the
@@ -89,11 +99,12 @@
 				"not_found_handling": "single-page-application",
 				"run_worker_first": ["/api/*"]
 			},
-			// Coarse per-IP rate limit on the whole `/api/checktiv/*` relay - the real
-			// cost ceiling on live mints (the mock `requireStaff` gate has public
-			// credentials and stops nothing on its own). 100 requests / 60s per edge
-			// IP: generous enough for legitimate staff mint + status-poll traffic,
-			// tight enough to bound an abusive burst. `simple.period` must be 10 or 60.
+			// Coarse per-IP rate limit on the whole `/api/checktiv/*` relay - the ONLY
+			// cost ceiling on live mints, because this demo has no authentication of
+			// any kind (see the "NO AUTHENTICATION" note in `src/worker/index.ts`).
+			// 100 requests / 60s per edge IP: generous enough for legitimate staff mint
+			// + status-poll traffic, tight enough to bound an abusive burst.
+			// `simple.period` must be 10 or 60.
 			//
 			// `namespace_id` is a positive integer scoped PER CLOUDFLARE ACCOUNT (not
 			// per Worker): two bindings that share an id share the same counters, even

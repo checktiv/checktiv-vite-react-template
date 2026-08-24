@@ -3,8 +3,8 @@
  * What this teaches / copy this pattern:
  * <SetupForm> is the bring-your-own-key bootstrap - the FIRST screen every
  * visitor hits. We render the injectable inner `SetupForm` (NOT the default
- * export) inside a bare `MemoryRouter` (no `<GuardedRoute>`/`<AppShell>`,
- * matching its unguarded/unshelled contract) with a real "/reservations" route
+ * export) inside a bare `MemoryRouter` (no `<AppShell>`, matching its unshelled
+ * contract) with a real "/reservations" route
  * standing in for the redirect target and a real "wt_" list route. The template
  * list fetch is an INJECTED dep (`fetchTemplates`) with `debounceMs={0}`, so the
  * dropdown / loading / empty / error / manual-fallback paths are driven with a

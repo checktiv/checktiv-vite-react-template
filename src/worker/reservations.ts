@@ -18,6 +18,15 @@
  * becomes the hand-authored `Reservation` shape
  * (`src/shared/reservation-types.ts`). Nothing under `src/react-app/**` may
  * import this file, `db/schema.ts`, or `drizzle-orm`.
+ *
+ * UNAUTHENTICATED, READS INCLUDED - know this before you run local D1 dev on a
+ * public host. Every route in this file answers any caller: the demo has no auth
+ * layer (see the "NO AUTHENTICATION" note in `index.ts`). A reservation read
+ * returns guest name + email, so while a local dev server is exposed through the
+ * public tunnel the README asks for, anyone who knows that hostname can list every
+ * stored guest. Use fake guest data only. The deployed demo binds no D1
+ * (`PERSISTENCE=local`), so every route here answers the structured 501 there and
+ * no guest data exists server-side to read.
  */
 import { Hono, type Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
@@ -215,16 +224,18 @@ export function reservationsRoute(): Hono<{ Bindings: ReservationsEnv }> {
 	 * id, or any other row - so the applicant's "confirm your details" form
 	 * (`CheckInCollectForm`) can prefill legal name + email.
 	 *
-	 * Deliberately NOT staff-gated: the guest never authenticates, and holding the
-	 * check-in link (which carries the durable token in its fragment) is the capability,
-	 * exactly like the guest journey itself. It is mounted OUTSIDE the `/api/reservations`
-	 * `requireStaff` prefix in `index.ts` for that reason. Reservation ids are UUIDs
-	 * (`crypto.randomUUID()` on create), so `:id` is not an enumerable leak. This is a
-	 * DEMO-GRADE capability that rides on the demo's already-mock auth (see `AGENTS.md`
-	 * "Out of scope"); a production integration would authenticate the guest and scope
-	 * this read to their own reservation. In the deployed no-D1 shape this returns the
-	 * structured 501 and the collect form falls back to empty fields (the guest fills
-	 * them in), so prefill absence never blocks check-in.
+	 * Deliberately unauthenticated by DESIGN, and it always was: the guest never
+	 * signs in, and holding the check-in link (which carries the durable token in
+	 * its fragment) is the capability, exactly like the guest journey itself.
+	 * Reservation ids are UUIDs (`crypto.randomUUID()` on create), so `:id` is not
+	 * an enumerable leak. It is scoped to two fields on purpose - that scoping is
+	 * the point, and it is now the ONLY thing narrowing this route, since the demo
+	 * has no auth layer at all (see the "NO AUTHENTICATION" note in `index.ts`).
+	 * This is a DEMO-GRADE capability (see `AGENTS.md` "Out of scope"); a production
+	 * integration would authenticate the guest and scope this read to their own
+	 * reservation. In the deployed no-D1 shape this returns the structured 501 and
+	 * the collect form falls back to empty fields (the guest fills them in), so
+	 * prefill absence never blocks check-in.
 	 */
 	app.get("/api/checkin/:id", async (c) => {
 		if (!c.env.DB) return notAvailableResponse(c);

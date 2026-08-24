@@ -5,8 +5,20 @@
  * The ordering is load-bearing and worth copying verbatim:
  *
  *   1. `store.create(...)`  - persist the reservation FIRST (joined `guestName`)
- *   2. `client.createSession({ first_name, last_name, email })` - mint the session
+ *   2. `client.createSession(applicant)` - mint the session
  *   3. `store.update(id, { sessionId, status: 'invited' })` - link them together
+ *
+ * The applicant name each path sends is decided by what that path AUTHORITATIVELY
+ * knows, and the two paths differ:
+ *
+ *   - New booking: the form collected first/last as separate inputs, so the staff
+ *     member declared the boundary. Send `family_name` + `given_names`.
+ *   - Re-invite: all that survives is the joined `guestName` column, so the boundary
+ *     is unknown. Send it VERBATIM as `reference_name`, a non-authoritative display
+ *     label. The applicant supplies the screenable parts in the collect step.
+ *
+ * Never close that gap by splitting the joined name on whitespace to synthesize the
+ * name components. See the `ApplicantInput` docs in `lib/checktiv-client`.
  *
  * The guest check-in link carries the durable `client_token` and the org's PUBLIC
  * publishable key (`ah_pk_...`) in the URL FRAGMENT, never the query string:
@@ -28,15 +40,14 @@
  * warning instead (real verifications run against the visitor's own org).
  *
  * Testability: the injectable `ReservationsView` takes its `store`, `client`, and
- * `config` as props (default export wires the real singletons + `<GuardedRoute>`),
- * so the flow is unit-tested with typed mocks and no auth backend.
+ * `config` as props (the default export wires the real singletons), so the flow is
+ * unit-tested with typed mocks and no network.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 
 import { AppShell } from "../components/AppShell";
 import { BookingForm, type BookingFormValues } from "../components/BookingForm";
-import { GuardedRoute } from "../components/GuardedRoute";
 import { StatusChip } from "../components/StatusChip";
 import { Button } from "../components/ui/button";
 import {
@@ -64,7 +75,11 @@ import {
 } from "../components/ui/table";
 import { Label } from "../components/ui/label";
 
-import { checktivClient, type ChecktivClient } from "../lib/checktiv-client";
+import {
+	checktivClient,
+	type ApplicantInput,
+	type ChecktivClient,
+} from "../lib/checktiv-client";
 import { getConfig, clearConfig } from "../lib/config-store";
 import { selectStore, type ReservationStore } from "../lib/reservation-store";
 import type { DemoConfig } from "../../shared/checktiv-config";
@@ -113,23 +128,9 @@ function clearCheckInStashes(): void {
 	for (const key of keys) sessionStorage.removeItem(key);
 }
 
-/** Split a stored joined `guestName` back into first/last for a re-invite mint. */
-function splitName(guestName: string): { first_name: string; last_name: string } {
-	const trimmed = guestName.trim();
-	const firstSpace = trimmed.indexOf(" ");
-	if (firstSpace === -1) {
-		return { first_name: trimmed, last_name: "" };
-	}
-	return {
-		first_name: trimmed.slice(0, firstSpace),
-		last_name: trimmed.slice(firstSpace + 1),
-	};
-}
-
 /**
  * Injectable inner component holding the list + booking flow. Rendered directly
- * by tests with mock deps; wrapped in `<GuardedRoute>`/`<AppShell>` by the default
- * export below.
+ * by tests with mock deps; wrapped in `<AppShell>` by the default export below.
  */
 export function ReservationsView({ store, client, config }: ReservationsViewProps) {
 	const isTestMode = config.ctx.mode === "test";
@@ -194,10 +195,7 @@ export function ReservationsView({ store, client, config }: ReservationsViewProp
 	 * recoverable banner (the reservation is left untouched / still a draft).
 	 */
 	const mintFor = useCallback(
-		async (
-			reservationId: string,
-			applicant: { first_name: string; last_name: string; email: string },
-		) => {
+		async (reservationId: string, applicant: ApplicantInput) => {
 			const result = await client.createSession(
 				applicant,
 				isTestMode ? { expectedOutcome } : undefined,
@@ -230,9 +228,16 @@ export function ReservationsView({ store, client, config }: ReservationsViewProp
 					checkIn: values.checkIn,
 					checkOut: values.checkOut,
 				});
+				// The booking form captured the name as two SEPARATE inputs, so the
+				// family/given boundary is the one the staff member typed, not one this
+				// code inferred. That is the only reason it is safe to send the
+				// structured pair here. Each field is omitted when blank rather than
+				// sent as "", which the wire schema rejects.
+				const familyName = values.lastName.trim();
+				const givenName = values.firstName.trim();
 				await mintFor(created.id, {
-					first_name: values.firstName,
-					last_name: values.lastName,
+					...(familyName ? { family_name: familyName } : {}),
+					given_names: givenName ? [givenName] : [],
 					email: values.email,
 				});
 			} catch (error) {
@@ -265,8 +270,17 @@ export function ReservationsView({ store, client, config }: ReservationsViewProp
 			setRetryingId(reservation.id);
 			setInviteError(null);
 			try {
+				// A saved reservation carries ONE joined `guestName` column, so this path
+				// does NOT know where the family name begins. It goes verbatim to
+				// `reference_name`, a non-authoritative display label, because that is
+				// honestly all an unsplittable string is: the applicant supplies the
+				// screenable family/given parts themselves in the collect step. Splitting
+				// it here to refill the components is exactly the bug the ICAO shape
+				// removes: it would mangle "Garcia Lopez", "van der Berg", and every
+				// family-name-first booking.
+				const referenceName = reservation.guestName.trim();
 				await mintFor(reservation.id, {
-					...splitName(reservation.guestName),
+					...(referenceName ? { reference_name: referenceName } : {}),
 					email: reservation.guestEmail,
 				});
 				await loadList();
@@ -533,9 +547,9 @@ function ReservationList({
 }
 
 /**
- * Route entry: resolves the real store + config + client singletons and applies
- * the auth guard + app shell. If no key has been configured yet, it bootstraps
- * the visitor to Setup rather than failing mid-flow.
+ * Route entry: resolves the real store + config + client singletons. If no key has
+ * been configured yet, it bootstraps the visitor to Setup rather than failing
+ * mid-flow. There is no auth guard - this demo has no sign-in (see `main.tsx`).
  */
 export default function ReservationsPage() {
 	const store = useMemo(() => selectStore(), []);
@@ -543,9 +557,5 @@ export default function ReservationsPage() {
 	if (!config) {
 		return <Navigate to="/setup" replace />;
 	}
-	return (
-		<GuardedRoute>
-			<ReservationsView store={store} client={checktivClient} config={config} />
-		</GuardedRoute>
-	);
+	return <ReservationsView store={store} client={checktivClient} config={config} />;
 }
